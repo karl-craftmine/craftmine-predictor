@@ -40,12 +40,13 @@ class TeamForm:
     _count: dict[str, int] = field(default_factory=dict)
     sampled: list[dict[str, Any]] = field(default_factory=list)
 
-    def add(self, key: str, value_for: Optional[float], value_against: Optional[float]) -> None:
+    def add(self, key: str, value_for: Optional[float], value_against: Optional[float],
+            weight: float = 1.0) -> None:
         if value_for is None or value_against is None:
             return
-        self._sum_for[key] = self._sum_for.get(key, 0.0) + value_for
-        self._sum_against[key] = self._sum_against.get(key, 0.0) + value_against
-        self._count[key] = self._count.get(key, 0) + 1
+        self._sum_for[key] = self._sum_for.get(key, 0.0) + weight * value_for
+        self._sum_against[key] = self._sum_against.get(key, 0.0) + weight * value_against
+        self._count[key] = self._count.get(key, 0.0) + weight
 
     def avg_for(self, key: str) -> Optional[float]:
         n = self._count.get(key, 0)
@@ -62,7 +63,7 @@ class TeamForm:
             out[k] = {
                 "for": round(af, 2) if af is not None else None,
                 "against": round(aa, 2) if aa is not None else None,
-                "samples": self._count[k],
+                "samples": int(round(self._count[k])),   # weighted count -> whole matches
             }
         return out
 
@@ -107,10 +108,11 @@ def build_form(team_name: str, matches: list[dict[str, Any]]) -> TeamForm:
     """Build a TeamForm from per-match {'for': {...}, 'against': {...}} dicts."""
     form = TeamForm(team_name=team_name)
     for m in matches:
+        w = m.get("weight", 1.0)   # optional recency weight (default: all equal)
         f, a = m.get("for", {}), m.get("against", {})
         keys = set(f) | set(a)
         for k in keys:
-            form.add(k, f.get(k), a.get(k))
+            form.add(k, f.get(k), a.get(k), weight=w)
         form.matches += 1
         form.sampled.append(
             {

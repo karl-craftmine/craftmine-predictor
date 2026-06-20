@@ -88,17 +88,48 @@ def _goal_matrix(lam_home: float, lam_away: float):
             for i in range(MAX_GOALS + 1)]
 
 
+# Dixon–Coles low-score dependence correction. Independent Poisson under-predicts
+# draws (0-0, 1-1) and over-predicts 1-0/0-1; this re-weights those four cells.
+# rho < 0 boosts draws; a commonly fitted value for football is around -0.13.
+DIXON_COLES_RHO = -0.13
+
+
+def _dc_tau(i: int, j: int, lam: float, mu: float, rho: float) -> float:
+    if i == 0 and j == 0:
+        return 1.0 - lam * mu * rho
+    if i == 0 and j == 1:
+        return 1.0 + lam * rho
+    if i == 1 and j == 0:
+        return 1.0 + mu * rho
+    if i == 1 and j == 1:
+        return 1.0 - rho
+    return 1.0
+
+
+def _apply_dixon_coles(matrix, lam: float, mu: float, rho: float):
+    """Re-weight the four low-score cells and renormalise to a valid distribution."""
+    adj = [row[:] for row in matrix]
+    for i in (0, 1):
+        for j in (0, 1):
+            adj[i][j] = max(0.0, matrix[i][j] * _dc_tau(i, j, lam, mu, rho))
+    total = sum(sum(row) for row in adj)
+    return [[c / total for c in row] for row in adj] if total > 0 else adj
+
+
 def predict_match(
     home: TeamForm,
     away: TeamForm,
     home_advantage: float = 1.10,
     goals_line: float = 2.5,
     corners_line: float = 9.5,
+    rho: float = 0.0,
 ) -> MatchPrediction:
     # --- goals ---
     eh, ea, ch, ca = expected_values(home, away, home_advantage)
 
     matrix = _goal_matrix(eh, ea)
+    if rho:                                  # Dixon–Coles low-score correction
+        matrix = _apply_dixon_coles(matrix, eh, ea, rho)
     p_home = p_draw = p_away = p_btts = 0.0
     for i in range(MAX_GOALS + 1):
         for j in range(MAX_GOALS + 1):

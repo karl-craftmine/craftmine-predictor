@@ -266,6 +266,34 @@ class FlashscoreScraper:
             })
         return out
 
+    def team_history(self, team: dict[str, str], pages: int = 2) -> list[dict[str, Any]]:
+        """Goals-only match history (newest first) — cheap: no per-match stats.
+
+        Used by the backtester, which only needs scores/dates/opponent ids and
+        would otherwise fire one stats request per historical match.
+        """
+        pid, cc = team["id"], team.get("country_id", "")
+        out: list[dict[str, Any]] = []
+        for r in self._recent_results(cc, pid, pages=pages):
+            is_home = r.get("PX") == pid
+            is_away = r.get("PY") == pid
+            if not (is_home or is_away):
+                continue
+            hg, ag = _num(r.get("AG")), _num(r.get("AH"))
+            if hg is None or ag is None:
+                continue
+            out.append({
+                "match_id": r["AA"],
+                "date": _date(r.get("AD")),
+                "ts": int(r.get("AD", 0) or 0),
+                "venue": "H" if is_home else "A",
+                "opponent_id": (r.get("PY") if is_home else r.get("PX")) or "",
+                "opponent": (r.get("AF") if is_home else r.get("AE")) or "",
+                "goals_for": hg if is_home else ag,
+                "goals_against": ag if is_home else hg,
+            })
+        return out
+
 
 def is_national_team(team_name: str) -> bool:
     """True if this is a national team and should be routed to Flashscore.
