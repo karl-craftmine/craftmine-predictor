@@ -73,6 +73,12 @@ def aggregate_players(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     Sorted by average rating. Used to populate player-prop dropdowns and to
     seed per-player Poisson means for player markets.
+
+    ``shots``/``sot`` are tracked only over the games that actually carried
+    them, and ``shots_avg``/``sot_avg`` come back ``None`` when no sampled game
+    had that stat. This is the Flashscore (national-team) case — it exposes
+    ratings and goals per player but no per-player shot data — and lets the
+    caller hide the shots/SoT props instead of modelling a phantom zero.
     """
     agg: dict[str, dict[str, float]] = {}
     for m in matches:
@@ -80,11 +86,14 @@ def aggregate_players(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
             name = p.get("name")
             if not name:
                 continue
-            a = agg.setdefault(name, {"shots": 0.0, "sot": 0.0, "goals": 0.0,
+            a = agg.setdefault(name, {"shots": 0.0, "shot_games": 0,
+                                      "sot": 0.0, "sot_games": 0, "goals": 0.0,
                                       "rating": 0.0, "games": 0,
                                       "position": p.get("position")})
-            a["shots"] += p.get("shots", 0) or 0
-            a["sot"] += p.get("sot", 0) or 0
+            if p.get("shots") is not None:
+                a["shots"] += p["shots"]; a["shot_games"] += 1
+            if p.get("sot") is not None:
+                a["sot"] += p["sot"]; a["sot_games"] += 1
             a["goals"] += p.get("goals", 0) or 0
             a["rating"] += p.get("rating", 0) or 0
             a["games"] += 1
@@ -95,8 +104,8 @@ def aggregate_players(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "name": name,
             "position": a["position"],
             "games": g,
-            "shots_avg": round(a["shots"] / g, 2),
-            "sot_avg": round(a["sot"] / g, 2),
+            "shots_avg": round(a["shots"] / a["shot_games"], 2) if a["shot_games"] else None,
+            "sot_avg": round(a["sot"] / a["sot_games"], 2) if a["sot_games"] else None,
             "goals_avg": round(a["goals"] / g, 3),
             "rating_avg": round(a["rating"] / g, 2),
         })

@@ -86,30 +86,31 @@ def _get_data(home, away, matches):
             return _LOADED[k]
 
         ht, hm, at, am = None, None, None, None
+        hsrc = asrc = None      # which provider supplied each side (for the UI)
         # Use Flashscore for international teams (free, current data)
         if flashscore.is_national_team(home):
             try:
-                ht, hm = flashscore.load_team(home, matches)
+                ht, hm = flashscore.load_team(home, matches); hsrc = "flashscore"
             except flashscore.FlashscoreError:
                 # Fallback to API-Football if Flashscore fails
                 if apifootball.has_key():
-                    ht, hm = apifootball.load_team(home, matches)
+                    ht, hm = apifootball.load_team(home, matches); hsrc = "apifootball"
         if flashscore.is_national_team(away):
             try:
-                at, am = flashscore.load_team(away, matches)
+                at, am = flashscore.load_team(away, matches); asrc = "flashscore"
             except flashscore.FlashscoreError:
                 # Fallback to API-Football if Flashscore fails
                 if apifootball.has_key():
-                    at, am = apifootball.load_team(away, matches)
+                    at, am = apifootball.load_team(away, matches); asrc = "apifootball"
 
         if not hm or not am:
             with WhoScoredScraper(headless=True) as ws:
                 if not hm:
                     ht = ws.search_team(home)
-                    hm = ws.team_recent_matches(ht, matches)
+                    hm = ws.team_recent_matches(ht, matches); hsrc = "whoscored"
                 if not am:
                     at = ws.search_team(away)
-                    am = ws.team_recent_matches(at, matches)
+                    am = ws.team_recent_matches(at, matches); asrc = "whoscored"
 
         if not hm or not am:
             raise WhoScoredError("Couldn't find enough finished matches for one "
@@ -121,6 +122,7 @@ def _get_data(home, away, matches):
             "home_players": aggregate_players(hm),
             "away_players": aggregate_players(am),
             "home_matches": len(hm), "away_matches": len(am),
+            "home_source": hsrc, "away_source": asrc,
         }
         _LOADED[k] = data
         return data
@@ -153,9 +155,9 @@ def api_load():
     available = [m for m in COUNT_METRICS if m in fh or m in fa]
     return jsonify({
         "home": {"name": data["home_team"]["name"], "id": data["home_team"]["id"],
-                 "matches": data["home_matches"]},
+                 "matches": data["home_matches"], "source": data["home_source"]},
         "away": {"name": data["away_team"]["name"], "id": data["away_team"]["id"],
-                 "matches": data["away_matches"]},
+                 "matches": data["away_matches"], "source": data["away_source"]},
         "metric_labels": METRIC_LABELS,
         "available_metrics": available,
         "form_home": fh, "form_away": fa,

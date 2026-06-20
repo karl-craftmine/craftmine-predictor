@@ -59,6 +59,10 @@ _STAT_MAP = {
     "Red cards": "red_cards",
 }
 
+# Lineup-feed incident codes (LII). We only need the goal marker; the rest
+# (6=subbed off, 7=subbed on, 8=assist, 1=card) we don't currently use.
+_INCIDENT_GOAL = "3"
+
 
 class FlashscoreError(Exception):
     """Raised when Flashscore data can't be fetched/parsed (callers fall back)."""
@@ -205,6 +209,51 @@ class FlashscoreScraper:
                 away[key] = _num(r.get("SI"))       # SI = away value
         return {"home": home, "away": away}
 
+    def get_match_players(self, match_id: str) -> dict[str, list[dict[str, Any]]]:
+        """Per-player data for one match -> {'home': [...], 'away': [...]}.
+
+        Read from the lineups feed (``df_li_…``) — the only per-player source
+        Flashscore exposes for internationals. Each player is shaped like the
+        WhoScored scraper's output (``name, position, rating, shots, sot,
+        goals, started``) so build_form()/aggregate_players() work unchanged,
+        but ``shots``/``sot`` are always ``None``: Flashscore carries no
+        per-player shot data for national-team matches (its dedicated
+        player-stats feed ``df_psn`` is empty even for World Cup games).
+
+        Only players who actually appeared (those carrying a rating) are
+        returned, so matches Flashscore hasn't rated — most friendlies and
+        minor cups — yield empty lists. Feed layout: records are grouped into
+        Starting Lineups / Substitutes / Coaches sections; LC=1 marks the home
+        team, LC=2 the away team; starters carry a pitch slot (LL); LPR is the
+        0–10 rating; a goal shows as incident LII=3 on the scorer's record.
+        """
+        recs = self._records(self._feed(f"df_li_1_{match_id}", ttl=self.stats_ttl))
+        sides: dict[str, list[dict[str, Any]]] = {"home": [], "away": []}
+        side: Optional[str] = None     # current team: home (LC=1) / away (LC=2)
+        in_coaches = False             # skip the coaches section (LGT=4)
+        for r in recs:
+            if "LC" in r:                          # section header: which team
+                side = "home" if r["LC"] == "1" else "away"
+            if "LB" in r:                          # section header: which block
+                in_coaches = r.get("LGT") == "4" or r.get("LB") == "Coaches"
+            if in_coaches or side is None or "LI" not in r:
+                continue
+            rating = _num(r.get("LPR"))
+            if rating is None:                     # didn't play / match unrated
+                continue
+            sides[side].append({
+                "name": r.get("LI"),
+                "position": "GK" if r.get("LR") == "(G)" else None,
+                "rating": round(rating, 2),
+                "shots": None,        # not available for internationals
+                "sot": None,
+                # Lineup carries one headline incident per player, so a brace
+                # reads as a single goal — fine for Poisson player-goal means.
+                "goals": 1.0 if r.get("LII") == _INCIDENT_GOAL else 0.0,
+                "started": "LL" in r,              # only starters get a pitch slot
+            })
+        return sides
+
     def _recent_results(self, country_id: str, pid: str, pages: int = 1) -> list[dict[str, str]]:
         """Finished match records from the team's results feed (newest first).
 
@@ -240,6 +289,7 @@ class FlashscoreScraper:
             hg, ag = _num(r.get("AG")), _num(r.get("AH"))
             stats = self.get_match_statistics(r["AA"])
             has_stats = bool(stats["home"] or stats["away"])
+            match_players = self.get_match_players(r["AA"])
             if is_home:
                 for_stats, against_stats = dict(stats["home"]), dict(stats["away"])
                 for_stats["goals"], against_stats["goals"] = hg, ag
@@ -262,7 +312,7 @@ class FlashscoreScraper:
                 "opponent": opponent,
                 "for": for_stats,
                 "against": against_stats,
-                "players": [],   # Flashscore player stats aren't pulled (not needed)
+                "players": match_players["home"] if is_home else match_players["away"],
             })
         return out
 

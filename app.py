@@ -1,4 +1,7 @@
-"""Betting-style match predictor backed by WhoScored data.
+"""Betting-style match predictor.
+
+Clubs are sourced from WhoScored; national teams from Flashscore (faster feeds,
+and now the source of national per-player ratings + goals too).
 
 Examples
 --------
@@ -6,10 +9,10 @@ Examples
     python app.py "Liverpool" "Everton" --matches 12 --corners-line 10.5 --players
     python app.py 13 32                       # team IDs work too (Arsenal, Man Utd)
 
-Home team first. The tool opens a real browser (SeleniumBase UC mode) to clear
-Cloudflare, samples each team's recent finished matches from WhoScored,
-aggregates for/against averages (corners, shots, goals, ...), and prints a
-prediction with fair odds.
+Home team first. For clubs the tool opens a real browser (SeleniumBase UC mode)
+to clear Cloudflare and samples recent matches from WhoScored; national teams
+read Flashscore's JSON feeds directly (no browser). Either way it aggregates
+for/against averages (corners, shots, goals, ...) and prints fair odds.
 """
 
 from __future__ import annotations
@@ -67,8 +70,8 @@ def _apply_recency_weights(matches: list, half_life: int = 90) -> list:
             except Exception:
                 weight = 1.0
         
-        # Add weight to match dict
-        weighted_match = dict(m)
+        # Add weight to match dict, preserving all original fields including nested dicts
+        weighted_match = m.copy() if isinstance(m, dict) else dict(m)
         weighted_match["weight"] = weight
         weighted_matches.append(weighted_match)
     
@@ -110,7 +113,11 @@ def _maybe_players(args, home_team, home_matches, away_team, away_matches) -> No
         return
     for team, matches in ((home_team, home_matches), (away_team, away_matches)):
         print(f"\n  Top performers — {team['name']} (sampled matches):")
-        for pl in _top_players(matches)[:6]:
+        top_players = _top_players(matches)
+        if not top_players:
+            print("    No player data available for this data source")
+            continue
+        for pl in top_players[:6]:
             print(f"    {pl['avg']:>4}  {pl['name']:<22} "
                   f"{pl['position'] or '?':<4} ({pl['games']} gms)")
 
@@ -207,10 +214,13 @@ def main(argv=None) -> int:
     home_matches = away_matches = None
     home_team = away_team = None
     try:
+        # National teams → Flashscore (now incl. per-player ratings + goals) /
+        # API-Football; clubs → WhoScored. Player stats for nationals come from
+        # Flashscore's lineup feed, so there's no WhoScored-first detour anymore.
         home_api = flashscore.is_national_team(args.home)
         away_api = flashscore.is_national_team(args.away)
 
-        if home_api:
+        if home_api and not home_matches:
             print("Fetching home team from Flashscore...")
             try:
                 home_team, home_matches = flashscore.load_team(args.home, args.matches)
@@ -222,7 +232,7 @@ def main(argv=None) -> int:
                     home_team, home_matches = apifootball.load_team(args.home, args.matches)
                     if home_team:
                         print(f"  home: {home_team['name']} (id {home_team['id']})")
-        if away_api:
+        if away_api and not away_matches:
             print("Fetching away team from Flashscore...")
             try:
                 away_team, away_matches = flashscore.load_team(args.away, args.matches)
