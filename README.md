@@ -7,7 +7,7 @@ processes**, and prints **fair odds** for every market so you can compare
 against a bookmaker.
 
 It predicts two ways from the *same* model:
-
+(false part cause its dixon + mc)
 - an **analytical Poisson** model (closed-form 1X2, Over/Under, BTTS, corners), and
 - a **Monte Carlo simulation** that adds exact-score distributions, Asian
   handicaps, clean sheets, win-to-nil, per-team corner lines, and a full custom
