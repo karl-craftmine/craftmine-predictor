@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Match Predictor</title>
+<style>
+  :root {
+    --bg:#0f1216; --panel:#181d24; --panel2:#1f2630; --line:#2a323d;
+    --text:#e6eaf0; --muted:#93a0b0; --accent:#4ade80; --accent2:#38bdf8;
+    --bar:#2dd4bf33; --warn:#f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:24px 18px 70px; }
+  h1 { font-size:22px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select { background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:9px; padding:9px 11px; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent2); }
+  .row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  .field { flex:1; min-width:140px; } .field input, .field select { width:100%; }
+  .vs { color:var(--muted); padding:0 2px 11px; font-weight:600; }
+  button { background:var(--accent); color:#06251a; border:none; font-weight:700;
+    padding:10px 18px; border-radius:9px; cursor:pointer; font-size:14px; }
+  button.ghost { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .small { width:110px; flex:none; }
+  .status { margin:6px 0 0; color:var(--muted); display:none; align-items:center; gap:10px; }
+  .status.show { display:flex; }
+  .spin { width:15px; height:15px; border:2px solid var(--line); border-top-color:var(--accent);
+    border-radius:50%; animation:sp .8s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  .err { margin-top:10px; background:#2a1517; border:1px solid var(--warn); color:#fca6a6;
+    padding:10px 13px; border-radius:10px; display:none; }
+  h3 { margin:0 0 10px; font-size:14px; color:var(--accent); letter-spacing:.3px; }
+  #builder, #results { display:none; }
+  .matchbar { font-size:18px; font-weight:700; margin-bottom:4px; }
+  .matchbar .g { color:var(--muted); font-weight:600; }
+  .meta { color:var(--muted); font-size:12.5px; margin-bottom:14px; }
+  .builderrow { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  #fields { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; flex:1; }
+  .slip { list-style:none; margin:12px 0 0; padding:0; }
+  .slip li { display:flex; justify-content:space-between; align-items:center;
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:7px 11px; margin-top:6px; font-size:14px; }
+  .slip .x { color:var(--warn); cursor:pointer; font-weight:700; padding:0 4px; }
+  .slipempty { color:var(--muted); font-size:13px; margin-top:8px; }
+  .mrow { position:relative; display:flex; align-items:center; padding:8px 10px;
+    border-radius:7px; font-size:14px; overflow:hidden; }
+  .mrow + .mrow { margin-top:3px; }
+  .mrow .fill { position:absolute; inset:0; background:var(--bar); z-index:0; }
+  .mrow .lab { position:relative; z-index:1; flex:1; }
+  .mrow .p { position:relative; z-index:1; color:var(--muted); width:62px; text-align:right; }
+  .mrow .odds { position:relative; z-index:1; color:var(--accent2); width:60px; text-align:right; }
+  details { margin-top:14px; } summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; margin-top:8px; }
+  th,td { padding:6px 4px; text-align:right; } th:first-child,td:first-child { text-align:left; color:var(--muted); }
+  thead th { color:var(--muted); border-bottom:1px solid var(--line); }
+  .foot { color:var(--muted); font-size:12px; margin-top:20px; text-align:center; }
+  .field { position:relative; }
+  .ac { position:absolute; top:100%; left:0; right:0; z-index:20; background:var(--panel2);
+    border:1px solid var(--line); border-radius:9px; margin-top:3px; overflow:hidden; display:none;
+    box-shadow:0 8px 24px #0008; }
+  .ac div { padding:8px 11px; cursor:pointer; font-size:14px; }
+  .ac div:hover { background:var(--line); }
+  .upbtn { margin-top:10px; }
+  .upcoming { margin-top:10px; display:none; }
+  .fx { display:flex; justify-content:space-between; align-items:center; background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:7px 11px; margin-top:6px;
+    font-size:14px; cursor:pointer; }
+  .fx:hover { border-color:var(--accent2); }
+  .fx .d { color:var(--muted); font-size:12px; }
+  .frow { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  .fctrl { display:flex; align-items:center; gap:8px; }
+  .fctrl button { padding:7px 12px; font-size:13px; }
+  .fxlist { margin-top:12px; }
+  .dayhdr { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin:10px 0 4px; }
+  .managebox { display:none; grid-template-columns:1fr 1fr; gap:18px; margin-top:14px;
+    border-top:1px solid var(--line); padding-top:14px; }
+  @media (max-width:720px) { .managebox { grid-template-columns:1fr; } }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; }
+  .chip { background:var(--panel2); border:1px solid var(--line); border-radius:20px;
+    padding:4px 10px; font-size:13px; display:flex; align-items:center; gap:6px; }
+  .chip .x { color:var(--warn); cursor:pointer; font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Craftmine Football Predictor</h1>
+  <div class="sub">Whoscored data | Match simulator | Bet builder</div>
+
+  <div class="panel" id="follow">
+    <div class="frow">
+      <h3 style="margin:0">📅 Upcoming Fixtures</h3>
+      <div class="fctrl">
+        <span class="meta" id="fxupdated"></span>
+        <button class="ghost" id="fxrefresh">↻ Refresh</button>
+        <button class="ghost" id="fxmanage">Follow</button>
+      </div>
+    </div>
+    <div class="fxlist" id="fxlist"></div>
+    <div class="managebox" id="managebox">
+      <div>
+        <label>Followed teams</label>
+        <div class="chips" id="teamchips"></div>
+        <div class="row" style="margin-top:8px">
+          <div class="field"><input id="ftteam" placeholder="add a team…" autocomplete="off"><div class="ac" id="ac_follow"></div></div>
+          <button class="ghost" id="ftteamadd">Add</button>
+        </div>
+      </div>
+      <div>
+        <label>Followed competitions</label>
+        <div class="chips" id="compchips"></div>
+        <div class="row" style="margin-top:8px">
+          <div class="field"><input id="ftcomp" placeholder="search competitions…" autocomplete="off"><div class="ac" id="ac_comp"></div></div>
+          <button class="ghost" id="compfind">Browse</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label>Home team</label><input id="home" placeholder="start typing…" autocomplete="off"><div class="ac" id="ac_home"></div></div>
+      <div class="vs">vs</div>
+      <div class="field"><label>Away team</label><input id="away" placeholder="start typing…" autocomplete="off"><div class="ac" id="ac_away"></div></div>
+      <div class="field small"><label>Matches/team</label><input id="matches" type="number" value="10" min="3" max="20"></div>
+      <button id="load">Load match</button>
+    </div>
+    <div class="status" id="status"><div class="spin"></div><div id="statusmsg"></div></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="panel" id="builder">
+    <div class="matchbar" id="matchbar"></div>
+    <div class="meta" id="matchmeta"></div>
+    <h3>BUILD A BET</h3>
+    <div class="builderrow">
+      <div class="field" style="max-width:230px"><label>Market</label><select id="market"></select></div>
+      <div id="fields"></div>
+      <button class="ghost" id="add">+ Add</button>
+    </div>
+    <ul class="slip" id="slip"></ul>
+    <div class="slipempty" id="slipempty">No bets added yet — add some above, or just Simulate for the standard markets.</div>
+    <div class="row" style="margin-top:14px">
+      <div class="field small"><label>Iterations</label><input id="iterations" type="number" value="50000" min="1000" max="200000" step="1000"></div>
+      <button id="sim">Simulate</button>
+      <div class="status" id="status2"><div class="spin"></div><div>Simulating…</div></div>
+    </div>
+  </div>
+
+  <div class="panel" id="results">
+    <div class="matchbar" id="resbar"></div>
+    <div class="meta" id="resmeta"></div>
+    <div id="betrows"></div>
+    <details><summary>Form — for / against (avg)</summary><div id="formtbl"></div></details>
+    <details><summary>Players (avg per game)</summary><div id="playertbl"></div></details>
+  </div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const pct = p => p == null ? "—" : (p*100).toFixed(1)+"%";
+const odds = o => o == null ? "—" : o.toFixed(2);
+let LOADED = null, SLIP = [];
+
+const LINES = { goals:2.5, half_goals:1.5, corners:9.5, shots:24.5, shots_on_target:8.5,
+  fouls:21.5, offsides:3.5, yellow_cards:3.5, red_cards:0.5, tackles:39.5, aerials_won:35.5 };
+const PLINES = { shots:1.5, sot:0.5, goals:0.5 };
+
+const MARKETS = [
+  {id:"result", name:"Match result (1X2)", f:["side3"]},
+  {id:"total_ou", name:"Total over/under", f:["metric","ou","line"]},
+  {id:"team_ou", name:"Team total over/under", f:["side2","metric","ou","line"]},
+  {id:"team_to_score", name:"Team to score", f:["side2"]},
+  {id:"btts", name:"Both teams to score", f:["bttsval"]},
+  {id:"result_btts", name:"Result + both teams to score", f:["side3","bttsval"]},
+  {id:"win_to_nil", name:"Win to nil (result + opp no goal)", f:["side2"]},
+  {id:"result_team_ou", name:"Result + a team's goals O/U", f:["side3","teamg","ou","lineg"]},
+  {id:"player_ou", name:"Player shots / SoT / goals O/U", f:["player","prop","ou","linep"]},
+  {id:"player_to_score", name:"Player to score (anytime)", f:["player"]},
+];
+
+function opt(v, t) { return `<option value="${v}">${t}</option>`; }
+
+function fieldHTML(kind) {
+  const H = LOADED.home.name, A = LOADED.away.name;
+  const metricOpts = LOADED.available_metrics.map(m => opt(m, LOADED.metric_labels[m])).join("");
+  const playerOpts = [
+    ...LOADED.players_home.map(p => opt("home:"+p.name, `${p.name} (${H})`)),
+    ...LOADED.players_away.map(p => opt("away:"+p.name, `${p.name} (${A})`)),
+  ].join("");
+  const small = "max-width:135px";
+  switch (kind) {
+    case "side3": return `<div class="field" style="${small}"><label>Pick</label>
+      <select id="f_side3">${opt("home",H+" win")}${opt("draw","Draw")}${opt("away",A+" win")}</select></div>`;
+    case "side2": return `<div class="field" style="${small}"><label>Team</label>
+      <select id="f_side2">${opt("home",H)}${opt("away",A)}</select></div>`;
+    case "teamg": return `<div class="field" style="${small}"><label>Whose goals</label>
+      <select id="f_teamg">${opt("home",H)}${opt("away",A)}</select></div>`;
+    case "bttsval": return `<div class="field" style="${small}"><label>BTTS</label>
+      <select id="f_btts">${opt("yes","Yes")}${opt("no","No")}</select></div>`;
+    case "metric": return `<div class="field" style="${small}"><label>Stat</label>
+      <select id="f_metric" onchange="metricLine()">${metricOpts}</select></div>`;
+    case "ou": return `<div class="field" style="max-width:110px"><label>O/U</label>
+      <select id="f_ou">${opt("over","Over")}${opt("under","Under")}</select></div>`;
+    case "line": return `<div class="field" style="max-width:95px"><label>Line</label>
+      <input id="f_line" type="number" step="0.5" value="2.5"></div>`;
+    case "lineg": return `<div class="field" style="max-width:95px"><label>Goals line</label>
+      <input id="f_line" type="number" step="0.5" value="1.5"></div>`;
+    case "player": return `<div class="field" style="max-width:230px"><label>Player</label>
+      <select id="f_player">${playerOpts}</select></div>`;
+    case "prop": return `<div class="field" style="${small}"><label>Stat</label>
+      <select id="f_prop" onchange="propLine()">${opt("shots","Shots")}${opt("sot","Shots on target")}${opt("goals","Goals")}</select></div>`;
+    case "linep": return `<div class="field" style="max-width:95px"><label>Line</label>
+      <input id="f_line" type="number" step="0.5" value="0.5"></div>`;
+  }
+  return "";
+}
+
+function renderFields() {
+  const m = MARKETS.find(x => x.id === $("market").value);
+  $("fields").innerHTML = m.f.map(fieldHTML).join("");
+  metricLine(); propLine();
+}
+function metricLine() { const m=$("f_metric"), l=$("f_line"); if(m&&l) l.value = LINES[m.value] ?? 2.5; }
+function propLine() { const p=$("f_prop"), l=$("f_line"); if(p&&l) l.value = PLINES[p.value] ?? 0.5; }
+
+function buildSpec() {
+  const id = $("market").value, g = i => $(i) && $(i).value;
+  switch (id) {
+    case "result": return {type:"result", side:g("f_side3")};
+    case "total_ou": return {type:"total_ou", metric:g("f_metric"), ou:g("f_ou"), line:+g("f_line")};
+    case "team_ou": return {type:"team_ou", side:g("f_side2"), metric:g("f_metric"), ou:g("f_ou"), line:+g("f_line")};
+    case "team_to_score": return {type:"team_to_score", side:g("f_side2")};
+    case "btts": return {type:"btts", value:g("f_btts")};
+    case "result_btts": return {type:"result_btts", side:g("f_side3"), btts:g("f_btts")};
+    case "win_to_nil": return {type:"win_to_nil", side:g("f_side2")};
+    case "result_team_ou": return {type:"result_team_ou", side:g("f_side3"), team:g("f_teamg"), ou:g("f_ou"), line:+g("f_line")};
+    case "player_ou": { const k=g("f_player"); return {type:"player_ou", key:k, name:k.split(":")[1], prop:g("f_prop"), ou:g("f_ou"), line:+g("f_line")}; }
+    case "player_to_score": { const k=g("f_player"); return {type:"player_to_score", key:k, name:k.split(":")[1]}; }
+  }
+}
+
+function specLabel(s) {
+  const H = LOADED.home.name, A = LOADED.away.name, T = x => x==="home"?H:A;
+  const ml = m => LOADED.metric_labels[m] || m;
+  switch (s.type) {
+    case "result": return s.side==="draw"?"Draw":`${T(s.side)} win`;
+    case "total_ou": return `${cap(s.ou)} ${s.line} total ${ml(s.metric)}`;
+    case "team_ou": return `${T(s.side)} ${s.ou} ${s.line} ${ml(s.metric)}`;
+    case "team_to_score": return `${T(s.side)} to score`;
+    case "btts": return s.value==="yes"?"Both teams to score":"BTTS - No";
+    case "result_btts": return `${s.side==="draw"?"Draw":T(s.side)+" win"} & ${s.btts==="yes"?"BTTS":"no BTTS"}`;
+    case "win_to_nil": return `${T(s.side)} win to nil`;
+    case "result_team_ou": return `${s.side==="draw"?"Draw":T(s.side)+" win"} & ${T(s.team)} ${s.ou} ${s.line} goals`;
+    case "player_ou": return `${s.name} ${s.ou} ${s.line} ${({shots:"shots",sot:"SoT",goals:"goals"})[s.prop]}`;
+    case "player_to_score": return `${s.name} to score`;
+  }
+}
+const cap = x => x.charAt(0).toUpperCase()+x.slice(1);
+
+function renderSlip() {
+  $("slipempty").style.display = SLIP.length ? "none" : "block";
+  $("slip").innerHTML = SLIP.map((s,i) =>
+    `<li><span>${specLabel(s)}</span><span class="x" onclick="removeBet(${i})">✕</span></li>`).join("");
+}
+window.removeBet = i => { SLIP.splice(i,1); renderSlip(); };
+
+function addBet() { SLIP.push(buildSpec()); renderSlip(); }
+
+async function loadMatch() {
+  const home=$("home").value.trim(), away=$("away").value.trim();
+  $("err").style.display="none"; $("builder").style.display="none"; $("results").style.display="none";
+  if(!home||!away){ showErr("Enter both teams."); return; }
+  $("load").disabled=true; $("status").classList.add("show");
+  const nat = new Set(["argentina","australia","austria","belgium","brazil","cameroon","canada","chile","china","colombia","croatia","czech republic","denmark","ecuador","egypt","england","france","germany","ghana","greece","hungary","iceland","iran","ireland","israel","italy","japan","mexico","morocco","netherlands","nigeria","norway","poland","portugal","qatar","saudi arabia","scotland","senegal","serbia","slovakia","slovenia","south africa","south korea","spain","sweden","switzerland","tunisia","turkey","ukraine","uruguay","usa","united states","wales"]);
+  const bothNat = nat.has(home.toLowerCase()) && nat.has(away.toLowerCase());
+  $("statusmsg").textContent = bothNat
+    ? "Fetching from Flashscore… national teams are usually ready in a few seconds."
+    : "Fetching match data… club teams use WhoScored (~1–2 min first lookup); national teams use Flashscore.";
+  try {
+    const r = await fetch("/api/load",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({home,away,matches:+$("matches").value})});
+    const d = await r.json();
+    if(!r.ok){ showErr(d.error||"Something went wrong."); return; }
+    LOADED=d; SLIP=[];
+    $("market").innerHTML = MARKETS.map(m=>opt(m.id,m.name)).join("");
+    renderFields(); renderSlip();
+    $("matchbar").textContent = `${d.home.name} vs ${d.away.name}`;
+    $("matchmeta").textContent = `Sampled ${d.home.matches} & ${d.away.matches} recent matches · ${d.players_home.length+d.players_away.length} players available for props`;
+    $("builder").style.display="block";
+  } catch(e){ showErr("Could not reach the server. Is it still running?"); }
+  finally { $("load").disabled=false; $("status").classList.remove("show"); }
+}
+
+async function simulate() {
+  $("sim").disabled=true; $("status2").classList.add("show"); $("err").style.display="none";
+  try {
+    const r = await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({home:LOADED.home.name, away:LOADED.away.name,
+        matches:+$("matches").value, iterations:+$("iterations").value, bets:SLIP})});
+    const d = await r.json();
+    if(!r.ok){ showErr(d.error||"Simulation failed."); return; }
+    renderResults(d);
+  } catch(e){ showErr("Could not reach the server."); }
+  finally { $("sim").disabled=false; $("status2").classList.remove("show"); }
+}
+
+function renderResults(d) {
+  $("resbar").innerHTML = `${d.home} <span class="g">${d.exp_home_goals} – ${d.exp_away_goals}</span> ${d.away}`;
+  $("resmeta").textContent = `${d.iterations.toLocaleString()} simulations`;
+  $("betrows").innerHTML = d.bets.map(b => `
+    <div class="mrow"><div class="fill" style="width:${b.prob==null?0:(b.prob*100).toFixed(1)}%"></div>
+      <span class="lab">${b.label}</span><span class="p">${pct(b.prob)}</span>
+      <span class="odds">${odds(b.odds)}</span></div>`).join("");
+  $("formtbl").innerHTML = formTable();
+  $("playertbl").innerHTML = playerTable();
+  $("results").style.display="block";
+  $("foot").textContent="Probabilities are model estimates with no bookmaker margin.";
+}
+
+function formTable() {
+  const ml=LOADED.metric_labels, fh=LOADED.form_home, fa=LOADED.form_away;
+  let body="";
+  for(const k in ml){ const h=fh[k],a=fa[k]; if(!h&&!a) continue;
+    const c=(x,f)=>x&&x[f]!=null?x[f].toFixed(1):"—";
+    body+=`<tr><td>${ml[k]}</td><td>${c(h,'for')}</td><td>${c(h,'against')}</td><td>${c(a,'for')}</td><td>${c(a,'against')}</td></tr>`; }
+  return `<table><thead><tr><th>metric</th><th>${LOADED.home.name} F</th><th>A</th><th>${LOADED.away.name} F</th><th>A</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function playerTable() {
+  const rowsFor = (list,team) => list.slice(0,6).map(p=>`<tr><td>${p.name} <span style="color:var(--muted)">${team}</span></td><td>${p.rating_avg}</td><td>${p.shots_avg}</td><td>${p.sot_avg}</td><td>${p.goals_avg}</td></tr>`).join("");
+  return `<table><thead><tr><th>player</th><th>rating</th><th>shots</th><th>SoT</th><th>goals</th></tr></thead><tbody>${rowsFor(LOADED.players_home,LOADED.home.name)}${rowsFor(LOADED.players_away,LOADED.away.name)}</tbody></table>`;
+}
+
+function setupAC(inputId, acId, endpoint="/api/teams") {
+  const inp=$(inputId), ac=$(acId); let timer;
+  inp.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q=inp.value.trim();
+    if(q.length<2){ ac.style.display="none"; return; }
+    timer=setTimeout(async () => {
+      try {
+        const r=await fetch(endpoint+"?q="+encodeURIComponent(q));
+        const list=await r.json();
+        if(!Array.isArray(list)||!list.length){ ac.style.display="none"; return; }
+        ac.innerHTML=list.map(t=>`<div>${t.name}</div>`).join("");
+        ac.querySelectorAll("div").forEach((dv,i)=>dv.addEventListener("mousedown", e=>{
+          e.preventDefault(); inp.value=list[i].name; ac.style.display="none";
+        }));
+        ac.style.display="block";
+      } catch(e){ ac.style.display="none"; }
+    }, 250);
+  });
+  inp.addEventListener("blur", ()=>setTimeout(()=>ac.style.display="none", 150));
+}
+setupAC("home","ac_home","/api/sdteam"); setupAC("away","ac_away","/api/sdteam");
+
+function showErr(m){ $("err").textContent=m; $("err").style.display="block"; }
+$("load").onclick=loadMatch;
+
+// ---- Following: fixtures calendar + follow management ----
+let FOLLOWS = {teams:[], competitions:[]};
+let LEAGUE_NAMES = {};   // league id -> name (for chips)
+const esc = s => String(s).replace(/"/g,"&quot;");
+
+async function loadLeagues(){ try{ (await (await fetch("/api/competitions")).json()).forEach(c=>LEAGUE_NAMES[c.key]=c.name); }catch(e){} renderChips(); }
+async function loadFollows(){ try{ FOLLOWS=await (await fetch("/api/follows")).json(); }catch(e){} renderChips(); }
+async function postFollows(){ try{ FOLLOWS=await (await fetch("/api/follows",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(FOLLOWS)}).then(r=>r.json())); }catch(e){} renderChips(); }
+
+function renderChips(){
+  const tc=$("teamchips"), cc=$("compchips");
+  tc.innerHTML = FOLLOWS.teams.length ? FOLLOWS.teams.map(t=>`<span class="chip">${t}<span class="x" data-k="t" data-v="${esc(t)}">✕</span></span>`).join("") : "<span class='meta'>none yet</span>";
+  cc.innerHTML = FOLLOWS.competitions.length ? FOLLOWS.competitions.map(c=>`<span class="chip">${LEAGUE_NAMES[c]||c}<span class="x" data-k="c" data-v="${esc(c)}">✕</span></span>`).join("") : "<span class='meta'>none yet</span>";
+  document.querySelectorAll(".chip .x").forEach(x=>x.onclick=()=>{
+    const v=x.dataset.v;
+    if(x.dataset.k==="t") FOLLOWS.teams=FOLLOWS.teams.filter(t=>t!==v);
+    else FOLLOWS.competitions=FOLLOWS.competitions.filter(c=>c!==v);
+    postFollows();
+  });
+}
+
+const STALE_HOURS = 6;   // re-pull in the background if the cache is older than this
+function localToday(){ const n=new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); }
+function isStale(updated){
+  if(!updated) return true;
+  if(updated.slice(0,10) < localToday()) return true;            // a new day
+  return (Date.now() - new Date(updated).getTime()) > STALE_HOURS*3600*1000;  // or too old
+}
+let _fxRefreshing=false;
+async function loadFixtures(auto=true){
+  try{ const d=await (await fetch("/api/fixtures")).json(); renderFixtures(d);
+    if(auto && isStale(d.updated)) autoRefresh(); }catch(e){}
+}
+async function autoRefresh(){
+  if(_fxRefreshing) return; _fxRefreshing=true;
+  $("fxupdated").textContent += " · updating…";
+  try{ const d=await (await fetch("/api/fixtures/refresh",{method:"POST"})).json();
+    if(d && !d.error && !d.busy) renderFixtures(d); }
+  catch(e){}
+  finally{ _fxRefreshing=false; }
+}
+function renderFixtures(d){
+  $("fxupdated").textContent = d.updated ? "updated "+d.updated.replace("T"," ") : "not refreshed yet";
+  const fx=d.fixtures||[];
+  if(!fx.length){ $("fxlist").innerHTML="<div class='slipempty'>No upcoming fixtures. Add teams or competitions under Follow, then ↻ Refresh. (Clubs are quiet in the off-season — try a competition that's on now.)</div>"; return; }
+  const byDate={}; fx.forEach(f=>{(byDate[f.date]=byDate[f.date]||[]).push(f);});
+  $("fxlist").innerHTML = Object.keys(byDate).sort().map(date=>
+    `<div class="dayhdr">${date}</div>`+byDate[date].map(f=>
+      `<div class="fx" data-h="${esc(f.home)}" data-a="${esc(f.away)}"><span>${f.home} <span style="color:var(--muted)">vs</span> ${f.away}${f.started?' <span style="color:var(--warn)">• live</span>':''}</span><span class="d">${f.competition||"followed team"}</span></div>`
+    ).join("")).join("");
+  $("fxlist").querySelectorAll(".fx").forEach(el=>el.onclick=()=>{ $("home").value=el.dataset.h; $("away").value=el.dataset.a; window.scrollTo({top:0}); loadMatch(); });
+}
+async function refreshFixtures(){
+  $("fxrefresh").disabled=true; const o=$("fxrefresh").textContent; $("fxrefresh").textContent="Refreshing… (~1–2 min)";
+  try{ const d=await (await fetch("/api/fixtures/refresh?force=1",{method:"POST"})).json(); if(d.error) showErr(d.error); else renderFixtures(d); }
+  catch(e){ showErr("Refresh failed."); }
+  finally{ $("fxrefresh").disabled=false; $("fxrefresh").textContent=o; }
+}
+
+function addComp(key){ if(key&&!FOLLOWS.competitions.includes(key)){ FOLLOWS.competitions.push(key); postFollows(); } $("ftcomp").value=""; $("ac_comp").style.display="none"; }
+function renderCompSug(list){
+  const ac=$("ac_comp");
+  if(!Array.isArray(list)||!list.length){ ac.style.display="none"; return; }
+  ac.innerHTML=list.map(c=>`<div>${c.name}</div>`).join("");
+  ac.querySelectorAll("div").forEach((dv,i)=>dv.addEventListener("mousedown",e=>{ e.preventDefault(); LEAGUE_NAMES[list[i].key]=list[i].name; addComp(list[i].key); }));
+  ac.style.display="block";
+}
+let _compTimer;
+$("ftcomp").addEventListener("input",()=>{ clearTimeout(_compTimer); const q=$("ftcomp").value.trim();
+  if(q.length<2){ $("ac_comp").style.display="none"; return; }
+  _compTimer=setTimeout(async()=>{ try{ renderCompSug(await (await fetch("/api/competitions?q="+encodeURIComponent(q))).json()); }catch(e){} },250); });
+$("ftcomp").addEventListener("blur",()=>setTimeout(()=>$("ac_comp").style.display="none",150));
+async function compOnNow(){
+  try{ renderCompSug(await (await fetch("/api/competitions")).json()); $("ftcomp").focus(); }
+  catch(e){ showErr("Couldn't list competitions."); }
+}
+
+setupAC("ftteam","ac_follow","/api/sdteam");
+$("fxmanage").onclick=()=>{ const m=$("managebox"); m.style.display = m.style.display==="grid" ? "none" : "grid"; };
+$("fxrefresh").onclick=refreshFixtures;
+$("ftteamadd").onclick=()=>{ const v=$("ftteam").value.trim(); if(v&&!FOLLOWS.teams.includes(v)){ FOLLOWS.teams.push(v); postFollows(); } $("ftteam").value=""; };
+$("compfind").onclick=compOnNow;
+loadLeagues(); loadFollows(); loadFixtures();
+$("market").onchange=renderFields;
+$("add").onclick=addBet;
+$("sim").onclick=simulate;
+["home","away"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")loadMatch();}));
+</script>
+</body>
+</html>

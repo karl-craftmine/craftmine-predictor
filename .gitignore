@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- PyInstaller intermediate build files ---
+build/
+
+# --- Runtime data & caches (regenerated on run; also holds the API key) ---
+cache/
+downloaded_files/
+
+# --- Secrets (belt-and-suspenders; cache/ already covers this) ---
+cache/apifootball_key.txt
+*.key
+
+# --- dist: ship only the distributable exe, ignore everything else there ---
+dist/*
+!dist/FootballPredictor.exe
+
+# --- logs / scratch ---
+*.log
+build_log.txt
+exe_log.txt
+
+# --- Claude Code personal/local settings ---
+.claude/settings.local.json
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db

@@ -1,0 +1,12 @@
+# Runtime dependencies for the predictor.
+seleniumbase>=4.40     # UC mode browser automation (WhoScored match stats)
+numpy>=1.26            # Monte Carlo simulation
+pyautogui>=0.9.54      # used by SeleniumBase to click the Cloudflare checkbox
+flask>=3.0             # local web app (server.py); CLI works without it
+requests>=2.31         # TheSportsDB fixtures API (fast upcoming-fixtures calendar)
+curl_cffi>=0.15        # Flashscore scraping (bypasses anti-bot measures)
+
+# Notes:
+#   - SeleniumBase fetches its own chromedriver automatically on first run.
+#   - You need Google Chrome installed (the script drives real Chrome).
+#   - curl_cffi provides browser TLS fingerprinting for Flashscore access.
