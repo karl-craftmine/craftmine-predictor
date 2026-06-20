@@ -1,5 +1,5 @@
-# Craftmine Football Predictor
-(partially false because its using dixon not poisson model)
+# Craftmine Football Predictor (partially false readme because its using dixon not poisson model)
+
 A transparent, betting-style football match predictor. It pulls each team's
 recent match stats, aggregates their performance **for and against** (goals,
 corners, shots, possession, …), models the match as a set of **Poisson
