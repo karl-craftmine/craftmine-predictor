@@ -139,6 +139,7 @@
   <div class="panel" id="builder">
     <div class="matchbar" id="matchbar"></div>
     <div class="meta" id="matchmeta"></div>
+    <div class="meta" id="sourcenote" style="margin-top:5px;line-height:1.45"></div>
     <h3>BUILD A BET</h3>
     <div class="builderrow">
       <div class="field" style="max-width:230px"><label>Market</label><select id="market"></select></div>
@@ -169,6 +170,23 @@ const $ = id => document.getElementById(id);
 const pct = p => p == null ? "—" : (p*100).toFixed(1)+"%";
 const odds = o => o == null ? "—" : o.toFixed(2);
 let LOADED = null, SLIP = [];
+
+// Flashscore (national-team) player data has ratings + goals but no per-player
+// shots/SoT, so those props are offered only when some loaded player has them.
+const anyShotData = () => !!LOADED &&
+  [...LOADED.players_home, ...LOADED.players_away].some(p => p.shots_avg != null);
+
+// Where each team's numbers come from, and what that means for the player table.
+const SRC_NAME = { flashscore:"Flashscore", whoscored:"WhoScored", apifootball:"API-Football" };
+function sourceNote(d){
+  const hn=SRC_NAME[d.home.source]||"its source", an=SRC_NAME[d.away.source]||"its source";
+  let s=`Stats source — ${d.home.name}: ${hn} · ${d.away.name}: ${an}.\n`;
+  const srcs=new Set([d.home.source,d.away.source]);
+  if(srcs.has("whoscored")) s+=" Clubs use WhoScored: full per-player stats (shots, SoT, goals, rating).";
+  if(srcs.has("flashscore")) s+=" National teams use Flashscore: per-player ratings & goals, but no per-player shots/SoT — those show “—” and the shots/SoT prop is hidden. Friendlies are often unrated, so only rated matches add players.";
+  if(srcs.has("apifootball")) s+=" One side fell back to API-Football: team-level stats only, no per-player data.";
+  return s;
+}
 
 const LINES = { goals:2.5, half_goals:1.5, corners:9.5, shots:24.5, shots_on_target:8.5,
   fouls:21.5, offsides:3.5, yellow_cards:3.5, red_cards:0.5, tackles:39.5, aerials_won:35.5 };
@@ -216,8 +234,9 @@ function fieldHTML(kind) {
       <input id="f_line" type="number" step="0.5" value="1.5"></div>`;
     case "player": return `<div class="field" style="max-width:230px"><label>Player</label>
       <select id="f_player">${playerOpts}</select></div>`;
-    case "prop": return `<div class="field" style="${small}"><label>Stat</label>
-      <select id="f_prop" onchange="propLine()">${opt("shots","Shots")}${opt("sot","Shots on target")}${opt("goals","Goals")}</select></div>`;
+    case "prop": { const sh = anyShotData();
+      return `<div class="field" style="${small}"><label>Stat</label>
+      <select id="f_prop" onchange="propLine()">${sh?opt("shots","Shots"):""}${sh?opt("sot","Shots on target"):""}${opt("goals","Goals")}</select></div>`; }
     case "linep": return `<div class="field" style="max-width:95px"><label>Line</label>
       <input id="f_line" type="number" step="0.5" value="0.5"></div>`;
   }
@@ -295,6 +314,7 @@ async function loadMatch() {
     renderFields(); renderSlip();
     $("matchbar").textContent = `${d.home.name} vs ${d.away.name}`;
     $("matchmeta").textContent = `Sampled ${d.home.matches} & ${d.away.matches} recent matches · ${d.players_home.length+d.players_away.length} players available for props`;
+    $("sourcenote").textContent = sourceNote(d);
     $("builder").style.display="block";
   } catch(e){ showErr("Could not reach the server. Is it still running?"); }
   finally { $("load").disabled=false; $("status").classList.remove("show"); }
@@ -335,8 +355,10 @@ function formTable() {
   return `<table><thead><tr><th>metric</th><th>${LOADED.home.name} F</th><th>A</th><th>${LOADED.away.name} F</th><th>A</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 function playerTable() {
-  const rowsFor = (list,team) => list.slice(0,6).map(p=>`<tr><td>${p.name} <span style="color:var(--muted)">${team}</span></td><td>${p.rating_avg}</td><td>${p.shots_avg}</td><td>${p.sot_avg}</td><td>${p.goals_avg}</td></tr>`).join("");
-  return `<table><thead><tr><th>player</th><th>rating</th><th>shots</th><th>SoT</th><th>goals</th></tr></thead><tbody>${rowsFor(LOADED.players_home,LOADED.home.name)}${rowsFor(LOADED.players_away,LOADED.away.name)}</tbody></table>`;
+  const rowsFor = (list,team) => list.slice(0,6).map(p=>`<tr><td>${p.name} <span style="color:var(--muted)">${team}</span></td><td>${p.rating_avg}</td><td>${p.shots_avg ?? "—"}</td><td>${p.sot_avg ?? "—"}</td><td>${p.goals_avg}</td></tr>`).join("");
+  const legend = [...LOADED.players_home,...LOADED.players_away].some(p=>p.shots_avg==null)
+    ? `<div class="meta" style="margin-top:6px">“—” = not published by that team's data source. National-team stats (Flashscore) include ratings &amp; goals but no per-player shots/SoT.</div>` : "";
+  return `<table><thead><tr><th>player</th><th>rating</th><th>shots</th><th>SoT</th><th>goals</th></tr></thead><tbody>${rowsFor(LOADED.players_home,LOADED.home.name)}${rowsFor(LOADED.players_away,LOADED.away.name)}</tbody></table>${legend}`;
 }
 
 function setupAC(inputId, acId, endpoint="/api/teams") {

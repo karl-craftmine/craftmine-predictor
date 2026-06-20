@@ -179,11 +179,15 @@ def run_simulation(home: TeamForm, away: TeamForm, iterations: int = 50000,
         sim.means[metric] = (round(eh, 2), round(ea, 2))
         sim.metrics[metric] = (rng.poisson(eh, iterations), rng.poisson(ea, iterations))
     for spec in (player_specs or []):
+        # shots/sot can be None (Flashscore nationals have no per-player shot
+        # data); leave those arrays None so evaluate_bet reports "no data"
+        # rather than simulating a misleading Poisson(0).
+        sh, so = spec.get("shots"), spec.get("sot")
         sim.players[spec["key"]] = {
             "name": spec.get("name"), "side": spec.get("side"),
-            "shots": rng.poisson(max(spec.get("shots", 0.0), 0.0), iterations),
-            "sot": rng.poisson(max(spec.get("sot", 0.0), 0.0), iterations),
-            "goals": rng.poisson(max(spec.get("goals", 0.0), 0.0), iterations),
+            "shots": rng.poisson(max(sh, 0.0), iterations) if sh is not None else None,
+            "sot": rng.poisson(max(so, 0.0), iterations) if so is not None else None,
+            "goals": rng.poisson(max(spec.get("goals") or 0.0, 0.0), iterations),
         }
     return sim
 
@@ -281,10 +285,11 @@ def evaluate_bet(sim: Simulation, spec: dict) -> dict:
         pl = sim.players.get(spec["key"])
         name = spec.get("name") or (pl and pl["name"]) or "player"
         prop = {"shots": "shots", "sot": "shots on target", "goals": "goals"}[spec["prop"]]
-        if not pl:
+        arr = pl.get(spec["prop"]) if pl else None
+        if arr is None:   # unknown player, or no shot data for this source
             return out(f"{name} {spec['ou']} {spec['line']} {prop}", None)
         return out(f"{name} {spec['ou']} {spec['line']} {prop}",
-                   _ou(pl[spec["prop"]], spec["line"], spec["ou"]))
+                   _ou(arr, spec["line"], spec["ou"]))
 
     if t == "player_to_score":
         pl = sim.players.get(spec["key"])
