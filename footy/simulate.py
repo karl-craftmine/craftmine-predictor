@@ -223,6 +223,25 @@ def run_simulation(home: TeamForm, away: TeamForm, iterations: int = 50000,
     return sim
 
 
+def top_scorelines(sim: Simulation, n: int = 6, cap: int = 8) -> list[tuple[str, float]]:
+    """Most likely exact scorelines from a ``run_simulation`` result.
+
+    Returns ``[("h-a", prob), ...]`` sorted by probability. Scores with more
+    than ``cap`` goals on either side are rare and left out of the list. This is
+    the "predicted score" view: the single best guess is just the first entry —
+    typically only ~10-15% likely, which is why it's shown with its probability.
+    """
+    goals = sim.metrics.get("goals")
+    if not goals:
+        return []
+    hg, ag = goals
+    m = (hg <= cap) & (ag <= cap)
+    pairs = Counter(zip(hg[m].tolist(), ag[m].tolist()))
+    out = [(f"{h}-{a}", c / sim.n) for (h, a), c in pairs.items()]
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out[:n]
+
+
 def _ou(arr, line, ou):
     over = float(np.mean(arr > line))
     return over if ou == "over" else 1.0 - over
@@ -271,6 +290,12 @@ def evaluate_bet(sim: Simulation, spec: dict) -> dict:
     if t == "team_to_score":
         arr = hg if spec["side"] == "home" else ag
         return out(f"{team(spec['side'])} to score", frac(arr > 0))
+
+    if t == "correct_score":
+        if goals is None:
+            return out("Correct score", None)
+        h, a = int(spec.get("home", 0)), int(spec.get("away", 0))
+        return out(f"{H} {h}-{a} {A}", frac((hg == h) & (ag == a)))
 
     if t == "win_to_nil":
         s = spec["side"]

@@ -158,6 +158,8 @@
   <div class="panel" id="results">
     <div class="matchbar" id="resbar"></div>
     <div class="meta" id="resmeta"></div>
+    <div id="mostlikely"></div>
+    <details id="scoresbox" open><summary>Most likely scorelines</summary><div id="scores"></div></details>
     <div id="betrows"></div>
     <details><summary>Form — for / against (avg)</summary><div id="formtbl"></div></details>
     <details><summary>Players (avg per game)</summary><div id="playertbl"></div></details>
@@ -194,6 +196,7 @@ const PLINES = { shots:1.5, sot:0.5, goals:0.5 };
 
 const MARKETS = [
   {id:"result", name:"Match result (1X2)", f:["side3"]},
+  {id:"correct_score", name:"Correct score", f:["score"]},
   {id:"total_ou", name:"Total over/under", f:["metric","ou","line"]},
   {id:"team_ou", name:"Team total over/under", f:["side2","metric","ou","line"]},
   {id:"team_to_score", name:"Team to score", f:["side2"]},
@@ -239,6 +242,10 @@ function fieldHTML(kind) {
       <select id="f_prop" onchange="propLine()">${sh?opt("shots","Shots"):""}${sh?opt("sot","Shots on target"):""}${opt("goals","Goals")}</select></div>`; }
     case "linep": return `<div class="field" style="max-width:95px"><label>Line</label>
       <input id="f_line" type="number" step="0.5" value="0.5"></div>`;
+    case "score": return `<div class="field" style="max-width:120px"><label>${H} goals</label>
+      <input id="f_scoreh" type="number" min="0" max="10" step="1" value="2"></div>
+      <div class="field" style="max-width:120px"><label>${A} goals</label>
+      <input id="f_scorea" type="number" min="0" max="10" step="1" value="1"></div>`;
   }
   return "";
 }
@@ -255,6 +262,7 @@ function buildSpec() {
   const id = $("market").value, g = i => $(i) && $(i).value;
   switch (id) {
     case "result": return {type:"result", side:g("f_side3")};
+    case "correct_score": return {type:"correct_score", home:+g("f_scoreh"), away:+g("f_scorea")};
     case "total_ou": return {type:"total_ou", metric:g("f_metric"), ou:g("f_ou"), line:+g("f_line")};
     case "team_ou": return {type:"team_ou", side:g("f_side2"), metric:g("f_metric"), ou:g("f_ou"), line:+g("f_line")};
     case "team_to_score": return {type:"team_to_score", side:g("f_side2")};
@@ -272,6 +280,7 @@ function specLabel(s) {
   const ml = m => LOADED.metric_labels[m] || m;
   switch (s.type) {
     case "result": return s.side==="draw"?"Draw":`${T(s.side)} win`;
+    case "correct_score": return `${H} ${s.home}–${s.away} ${A}`;
     case "total_ou": return `${cap(s.ou)} ${s.line} total ${ml(s.metric)}`;
     case "team_ou": return `${T(s.side)} ${s.ou} ${s.line} ${ml(s.metric)}`;
     case "team_to_score": return `${T(s.side)} to score`;
@@ -335,7 +344,20 @@ async function simulate() {
 
 function renderResults(d) {
   $("resbar").innerHTML = `${d.home} <span class="g">${d.exp_home_goals} – ${d.exp_away_goals}</span> ${d.away}`;
-  $("resmeta").textContent = `${d.iterations.toLocaleString()} simulations`;
+  $("resmeta").textContent = `${d.iterations.toLocaleString()} simulations · score above is expected (avg) goals`;
+  // "Predicted score": the single most likely scoreline + the full distribution.
+  const sl = d.scorelines || [];
+  if (sl.length) {
+    const [topLab, topP] = sl[0]; const [th, ta] = topLab.split("-");
+    $("mostlikely").innerHTML =
+      `<div style="margin:10px 0 2px;font-size:15px">Most likely score&nbsp; `
+      + `<strong>${d.home} ${th}–${ta} ${d.away}</strong> `
+      + `<span style="color:var(--muted);font-size:12px">(${(topP*100).toFixed(0)}% — best single guess; exact scores are inherently uncertain)</span></div>`;
+    $("scores").innerHTML = sl.map(([lab, p]) => { const [h, a] = lab.split("-");
+      return `<div class="mrow"><div class="fill" style="width:${(p*100).toFixed(1)}%"></div>`
+        + `<span class="lab">${h}–${a}</span><span class="p">${(p*100).toFixed(1)}%</span></div>`; }).join("");
+    $("scoresbox").style.display = "";
+  } else { $("mostlikely").innerHTML = ""; $("scoresbox").style.display = "none"; }
   $("betrows").innerHTML = d.bets.map(b => `
     <div class="mrow"><div class="fill" style="width:${b.prob==null?0:(b.prob*100).toFixed(1)}%"></div>
       <span class="lab">${b.label}</span><span class="p">${pct(b.prob)}</span>

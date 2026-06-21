@@ -19,7 +19,7 @@ from flask import Flask, jsonify, request
 
 from footy import (WhoScoredScraper, build_form, aggregate_players,
                    apply_recency_weights, run_simulation, evaluate_bet,
-                   sportsdb, DIXON_COLES_RHO)
+                   top_scorelines, sportsdb, DIXON_COLES_RHO)
 from footy import apifootball, flashscore
 from footy.whoscored import WhoScoredError
 from footy.form import METRIC_LABELS, COUNT_METRICS
@@ -220,6 +220,7 @@ def api_simulate():
         "iterations": iterations,
         "exp_home_goals": sim.means.get("goals", (None, None))[0],
         "exp_away_goals": sim.means.get("goals", (None, None))[1],
+        "scorelines": top_scorelines(sim, n=6),
         "bets": [evaluate_bet(sim, b) for b in bets],
     })
 
