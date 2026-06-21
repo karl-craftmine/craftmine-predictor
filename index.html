@@ -451,11 +451,12 @@ async function autoRefresh(){
   finally{ _fxRefreshing=false; }
 }
 function renderFixtures(d){
-  $("fxupdated").textContent = d.updated ? "updated "+d.updated.replace("T"," ") : "not refreshed yet";
+  $("fxupdated").textContent = (d.updated ? "updated "+d.updated.replace("T"," ") : "not refreshed yet") + (d.stale ? " · stale" : "");
   const fx=d.fixtures||[];
-  if(!fx.length){ $("fxlist").innerHTML="<div class='slipempty'>No upcoming fixtures. Add teams or competitions under Follow, then ↻ Refresh. (Clubs are quiet in the off-season — try a competition that's on now.)</div>"; return; }
+  const note = d.note ? `<div class="slipempty" style="color:var(--warn)">${esc(d.note)}</div>` : "";
+  if(!fx.length){ $("fxlist").innerHTML = note || "<div class='slipempty'>No upcoming fixtures. Add teams or competitions under Follow, then ↻ Refresh. (Clubs are quiet in the off-season — try a competition that's on now.)</div>"; return; }
   const byDate={}; fx.forEach(f=>{(byDate[f.date]=byDate[f.date]||[]).push(f);});
-  $("fxlist").innerHTML = Object.keys(byDate).sort().map(date=>
+  $("fxlist").innerHTML = note + Object.keys(byDate).sort().map(date=>
     `<div class="dayhdr">${date}</div>`+byDate[date].map(f=>
       `<div class="fx" data-h="${esc(f.home)}" data-a="${esc(f.away)}"><span>${f.home} <span style="color:var(--muted)">vs</span> ${f.away}${f.started?' <span style="color:var(--warn)">• live</span>':''}</span><span class="d">${f.competition||"followed team"}</span></div>`
     ).join("")).join("");

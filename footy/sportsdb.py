@@ -56,19 +56,37 @@ LEAGUES: dict[str, str] = {
 _session = requests.Session()
 _session.headers.update({"User-Agent": "footy-predictor/1.0"})
 _last = 0.0
+_errors = 0   # hard failures (after retries) — lets callers tell "API down" from "no events"
 
 
-def _get(path: str) -> dict[str, Any]:
-    global _last
-    wait = 0.3 - (time.time() - _last)   # be polite to the free API
-    if wait > 0:
-        time.sleep(wait)
-    try:
-        r = _session.get(f"{BASE}/{path}", timeout=15)
-        _last = time.time()
-        return r.json() if r.status_code == 200 else {}
-    except Exception:
-        return {}
+def _get(path: str, *, retries: int = 3) -> dict[str, Any]:
+    """GET a feed as JSON, retrying transient failures (esp. 429 rate-limits).
+
+    The free public key is shared and throttled, so a burst of requests often
+    gets 429s. We back off and retry; a 200 with empty lists legitimately means
+    "no events". A genuine 4xx returns {} (no data). If every retry fails we bump
+    ``_errors`` and return {} — so build_fixtures can avoid clobbering a good
+    cache with an empty result it only got because the API was unreachable.
+    """
+    global _last, _errors
+    for attempt in range(retries):
+        wait = 0.3 - (time.time() - _last)   # be polite to the free API
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            r = _session.get(f"{BASE}/{path}", timeout=15)
+            _last = time.time()
+            if r.status_code == 200:
+                return r.json()
+            transient = r.status_code in (429, 500, 502, 503, 504)
+        except Exception:
+            transient = True
+        if not transient:
+            return {}                         # genuine 4xx — no data, not a failure
+        if attempt < retries - 1:
+            time.sleep(1.0 * (attempt + 1))   # back off, then retry
+    _errors += 1                              # exhausted retries on a transient error
+    return {}
 
 
 def search_team_id(name: str) -> Optional[str]:

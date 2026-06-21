@@ -22,7 +22,8 @@ web app, the `.exe`, and the command line all price markets the same way.
 | Team type | Source | Notes |
 |-----------|--------|-------|
 | **Club** (Arsenal, Real Madrid, …) | **WhoScored** | drives a real headless Chrome (SeleniumBase UC mode); no public API |
-| **National** (Brazil, France, …) | **Flashscore** | free backend feed via `curl_cffi`; **no browser needed** |
+| Club (fallback) | **Flashscore** | when WhoScored can't cover a club (e.g. Russian leagues) or no browser is available |
+| **National** (Brazil, France, …) | **Flashscore** | free backend feed via `curl_cffi`; **no browser needed**. Obvious typos are auto-corrected ("Spein" → Spain) |
 | National (fallback) | **API-Football** | optional; only if Flashscore fails *and* you supply a free key |
 
 > ⚠️ For personal use. WhoScored/Flashscore have no public APIs, so be polite —
@@ -69,8 +70,8 @@ double-click it. A console window prints a local address (e.g.
 `http://127.0.0.1:5000`) — open that in your browser.
 
 - **Windows 64-bit**, needs an **internet** connection.
-- Install **Google Chrome** for *club*-team predictions (national teams work
-  without it).
+- Install **Google Chrome** for the richest *club* stats. Without it, clubs fall
+  back to Flashscore (covers many leagues); national teams never need a browser.
 - First launch is slow (it unpacks itself). Windows SmartScreen may warn because
   the app is unsigned → **More info → Run anyway**.
 

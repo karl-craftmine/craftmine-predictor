@@ -36,8 +36,14 @@ def save_follows(path: str | Path, follows: dict) -> None:
     }), encoding="utf-8")
 
 
-def build_fixtures(follows: dict, days: int = 7) -> list[dict[str, Any]]:
-    """Upcoming fixtures (next `days` days) for followed leagues + teams."""
+def build_fixtures(follows: dict, days: int = 7) -> tuple[list[dict[str, Any]], bool]:
+    """Upcoming fixtures (next `days` days) for followed leagues + teams.
+
+    Returns ``(fixtures, ok)``. ``ok`` is False if any TheSportsDB call hard-
+    failed (e.g. the free key got rate-limited), so the caller can tell an empty
+    result caused by an outage apart from a genuine "no matches scheduled".
+    """
+    errors_before = sportsdb._errors
     league_ids = {str(c) for c in follows.get("competitions", [])}
     team_names = follows.get("teams", [])
     today = datetime.date.today()
@@ -76,13 +82,36 @@ def build_fixtures(follows: dict, days: int = 7) -> list[dict[str, Any]]:
         merged.append(f)
 
     merged.sort(key=lambda x: (x["date"], x.get("time") or "", x["home"]))
-    return merged
+    ok = sportsdb._errors == errors_before
+    return merged, ok
 
 
 def refresh_cache(follows_path: str | Path, cache_path: str | Path) -> dict:
-    """Build fixtures for the saved follows and write them to the cache file."""
-    fixtures = build_fixtures(load_follows(follows_path))
+    """Build fixtures for the saved follows and write them to the cache file.
+
+    If the fixtures service was unreachable (rate-limited) and we got nothing,
+    keep the last good cache instead of blanking the calendar — and flag it stale
+    so the UI can say "couldn't refresh" rather than "no fixtures".
+    """
+    cache_path = Path(cache_path)
+    fixtures, ok = build_fixtures(load_follows(follows_path))
+
+    if not ok and not fixtures and cache_path.exists():
+        try:
+            old = json.loads(cache_path.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            old = None
+        if old and old.get("fixtures"):
+            old["stale"] = True
+            old["note"] = ("Couldn't reach the fixtures service (it may be rate-"
+                           "limiting) — showing the last results. Try Refresh again "
+                           "in a moment.")
+            return old
+
     payload = {"updated": datetime.datetime.now().isoformat(timespec="seconds"),
                "fixtures": fixtures}
-    Path(cache_path).write_text(json.dumps(payload), encoding="utf-8")
+    if not ok:
+        payload["note"] = ("Some fixtures may be missing — the fixtures service was "
+                           "rate-limiting. Try Refresh again in a moment.")
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload

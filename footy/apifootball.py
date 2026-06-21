@@ -15,6 +15,7 @@ NOTE: Free tier cannot use fixtures?last= — we pull finished games by season
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import time
@@ -78,6 +79,18 @@ COUNTRIES = {
 
 def is_national(name: str) -> bool:
     return (name or "").strip().lower() in COUNTRIES
+
+
+def closest_country(name: str, cutoff: float = 0.8) -> Optional[str]:
+    """Best-matching country for a (possibly misspelled) name, or None.
+
+    Used to (a) auto-route obvious country typos to Flashscore ('Spein' ->
+    'spain') and (b) suggest a correction in 'team not found' errors (looser
+    cutoff). Returns the lower-cased country key from COUNTRIES.
+    """
+    matches = difflib.get_close_matches(
+        (name or "").strip().lower(), list(COUNTRIES), n=1, cutoff=cutoff)
+    return matches[0] if matches else None
 
 
 _last = 0.0

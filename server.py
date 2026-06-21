@@ -78,6 +78,26 @@ def _key(home, away, matches):
     return f"{home.lower()}|{away.lower()}|{matches}"
 
 
+def _national_name(name) -> str | None:
+    """Country to treat `name` as a national team, or None.
+
+    Exact country match, or a close typo — so 'Spein' routes to Spain
+    (Flashscore) instead of dead-ending on a WhoScored club search.
+    """
+    if apifootball.is_national(name):
+        return name
+    return apifootball.closest_country(name, cutoff=0.8)
+
+
+def _team_error(name) -> str:
+    """A helpful 'couldn't load' message, suggesting a country if it's a typo."""
+    guess = apifootball.closest_country(name, cutoff=0.6)
+    if guess:
+        return f"Couldn't find '{name}'. Did you mean {guess.title()}?"
+    return (f"Couldn't find enough finished matches for '{name}' — check the "
+            "spelling? Some lower-division or less-covered leagues aren't available.")
+
+
 def _get_data(home, away, matches):
     k = _key(home, away, matches)
     if k in _LOADED:
@@ -88,34 +108,61 @@ def _get_data(home, away, matches):
 
         ht, hm, at, am = None, None, None, None
         hsrc = asrc = None      # which provider supplied each side (for the UI)
-        # Use Flashscore for international teams (free, current data)
-        if flashscore.is_national_team(home):
+
+        # National teams — exact name OR an obvious country typo ("Spein" ->
+        # Spain) — go to Flashscore (free, current), then API-Football.
+        home_nat, away_nat = _national_name(home), _national_name(away)
+        if home_nat:
+            try:
+                ht, hm = flashscore.load_team(home_nat, matches); hsrc = "flashscore"
+            except flashscore.FlashscoreError:
+                if apifootball.has_key():
+                    ht, hm = apifootball.load_team(home_nat, matches); hsrc = "apifootball"
+        if away_nat:
+            try:
+                at, am = flashscore.load_team(away_nat, matches); asrc = "flashscore"
+            except flashscore.FlashscoreError:
+                if apifootball.has_key():
+                    at, am = apifootball.load_team(away_nat, matches); asrc = "apifootball"
+
+        # Clubs go to WhoScored (richer club stats). Tolerate a not-found/empty
+        # result — and even a browser that won't start (no Chrome) — so the
+        # Flashscore fallback below can still try.
+        if not hm or not am:
+            try:
+                with WhoScoredScraper(headless=True) as ws:
+                    if not hm:
+                        try:
+                            ht = ws.search_team(home)
+                            hm = ws.team_recent_matches(ht, matches)
+                            if hm: hsrc = "whoscored"
+                        except WhoScoredError:
+                            pass
+                    if not am:
+                        try:
+                            at = ws.search_team(away)
+                            am = ws.team_recent_matches(at, matches)
+                            if am: asrc = "whoscored"
+                        except WhoScoredError:
+                            pass
+            except Exception:
+                pass   # browser unavailable (e.g. no Chrome) — try Flashscore next
+
+        # Flashscore fallback for clubs WhoScored can't cover (e.g. Russian
+        # leagues) — its feeds carry those clubs, incl. per-player ratings.
+        if not hm:
             try:
                 ht, hm = flashscore.load_team(home, matches); hsrc = "flashscore"
             except flashscore.FlashscoreError:
-                # Fallback to API-Football if Flashscore fails
-                if apifootball.has_key():
-                    ht, hm = apifootball.load_team(home, matches); hsrc = "apifootball"
-        if flashscore.is_national_team(away):
+                pass
+        if not am:
             try:
                 at, am = flashscore.load_team(away, matches); asrc = "flashscore"
             except flashscore.FlashscoreError:
-                # Fallback to API-Football if Flashscore fails
-                if apifootball.has_key():
-                    at, am = apifootball.load_team(away, matches); asrc = "apifootball"
+                pass
 
         if not hm or not am:
-            with WhoScoredScraper(headless=True) as ws:
-                if not hm:
-                    ht = ws.search_team(home)
-                    hm = ws.team_recent_matches(ht, matches); hsrc = "whoscored"
-                if not am:
-                    at = ws.search_team(away)
-                    am = ws.team_recent_matches(at, matches); asrc = "whoscored"
-
-        if not hm or not am:
-            raise WhoScoredError("Couldn't find enough finished matches for one "
-                                 "of those teams — check the spelling?")
+            raise WhoScoredError(_team_error(home if not hm else away))
         # Weight recent matches more heavily before aggregating (matches the CLI).
         hm = apply_recency_weights(hm)
         am = apply_recency_weights(am)
