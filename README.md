@@ -1,17 +1,21 @@
-# Craftmine Football Predictor (partially false readme because its using dixon not poisson model)
+# Craftmine Football Predictor
 
 A transparent, betting-style football match predictor. It pulls each team's
 recent match stats, aggregates their performance **for and against** (goals,
-corners, shots, possession, …), models the match as a set of **Poisson
-processes**, and prints **fair odds** for every market so you can compare
+corners, shots, possession, …) with **recent matches weighted more heavily**,
+models goals as **Poisson processes** with a **Dixon-Coles low-score
+correction**, and prints **fair odds** for every market so you can compare
 against a bookmaker.
 
 It predicts two ways from the *same* model:
 
-- an **analytical Poisson** model (closed-form 1X2, Over/Under, BTTS, corners), and
+- an **analytical** engine (closed-form 1X2, Over/Under, BTTS, corners), and
 - a **Monte Carlo simulation** that adds exact-score distributions, Asian
   handicaps, clean sheets, win-to-nil, per-team corner lines, and a full custom
   **bet builder**.
+
+Both engines apply the same Dixon-Coles correction and recency weighting, so the
+web app, the `.exe`, and the command line all price markets the same way.
 
 **Data sources are chosen automatically per team:**
 
@@ -33,22 +37,26 @@ A natural question: *"is it Poisson or Monte Carlo?"* **Both** — Poisson is th
 model; Monte Carlo is just one way to compute it.
 
 - **Poisson** is the assumption: each team's goals (corners, shots, …) follow a
-  Poisson distribution with a mean **λ** derived from recent form.
+  Poisson distribution with a mean **λ** derived from recent (recency-weighted)
+  form.
+- **Dixon-Coles** then fixes the well-known flaw in independent Poisson: it
+  under-rates draws (0-0, 1-1) and over-rates 1-0 / 0-1. We re-weight those four
+  low-score cells (ρ = −0.13) so draws get their fair share.
 - The **analytical** engine ([footy/predict.py](footy/predict.py)) plugs λ
-  straight into the Poisson formula — it builds the home×away score-probability
-  matrix and sums cells for 1X2 / O-U / BTTS. Exact, but only for markets with a
-  closed form.
+  straight into the formula — it builds the home×away score-probability matrix,
+  applies the Dixon-Coles weights, and sums cells for 1X2 / O-U / BTTS. Exact,
+  but only for markets with a closed form.
 - The **Monte Carlo** engine ([footy/simulate.py](footy/simulate.py)) instead
-  *draws* tens of thousands of random outcomes from those **same** Poisson
-  distributions and counts how often each result happens. Approximate (it
+  *draws* tens of thousands of random scorelines from that **same** Dixon-Coles
+  score matrix and counts how often each result happens. Approximate (it
   converges as iterations rise), but it can price **any** market — exact scores,
   handicaps, win-to-nil, player props.
 
-Both engines share the exact same λ values
-(`footy.predict.expected_values`), so they agree on common markets —
-[selftest.py](selftest.py) even asserts they match within ~2%. In short:
-**Poisson is the dice; Monte Carlo rolls them many times instead of doing the
-algebra.**
+Both engines share the same λ values and the same Dixon-Coles correction, so
+they agree on common markets — [selftest.py](selftest.py) asserts they match
+within ~2%, both with and without the correction. In short: **Poisson is the
+dice, Dixon-Coles shaves them toward draws, and Monte Carlo rolls them many
+times instead of doing the algebra.**
 
 ---
 
@@ -109,10 +117,12 @@ Over/Under 2.5, BTTS).
 - Over/Under (total or per-team) for **goals, corners, shots, shots on target,
   fouls, offsides, yellow/red cards** (clubs add first-half goals, tackles, aerials)
 - **Player** over/under (shots / shots on target / goals) and **player to score
-  (anytime)** — *club teams only; Flashscore national-team data has no player props*
+  (anytime)** — clubs get all of these; **national teams** get **goals / to-score**
+  props (from Flashscore per-player ratings + goals) but **not** shots / SoT,
+  which Flashscore doesn't publish for internationals
 
 The bet builder only offers markets it actually has data for, so the national-team
-menu is slightly shorter than the club menu.
+menu is slightly shorter than the club menu (no per-player shots/SoT).
 
 ### Following & upcoming fixtures
 
@@ -156,7 +166,10 @@ python app.py "Liverpool" "Everton" -m 12 --sim --players
 | `--goals-line X` | over/under goals line (default 2.5) |
 | `--corners-line X` | over/under corners line (default 9.5) |
 | `--home-advantage X` | home goal multiplier (default 1.10) |
-| `--players` | show each team's top players by average rating (club teams) |
+| `--no-dixon-coles` | disable the Dixon-Coles low-score correction |
+| `--no-recency` | weight all sampled matches equally (no recency decay) |
+| `--recency-half-life N` | recency half-life in days (default 90) |
+| `--players` | show each team's top players by average rating (clubs and national teams) |
 | `--show-browser` | show the Chrome window (default: hidden/headless) |
 | `--no-cache` | ignore cached match data |
 | `-v, --verbose` | print each sampled match as it's read |
@@ -184,9 +197,12 @@ your key stays private.
 ## What it pulls per match (for **and** against)
 
 - **Flashscore** (national): goals · corners · shots · shots on target ·
-  possession · fouls · offsides · yellow/red cards
-- **WhoScored** (clubs): all of the above **plus** first-half goals, aerials won,
-  tackles, pass accuracy, and **player ratings/shots** (so clubs get player props)
+  possession · fouls · offsides · yellow/red cards, **plus per-player ratings +
+  goals** from the lineup feed (so national teams get goals / to-score props —
+  but no per-player shots/SoT)
+- **WhoScored** (clubs): all of the team stats above **plus** first-half goals,
+  aerials won, tackles, pass accuracy, and **full per-player shots + ratings**
+  (so clubs also get shots/SoT player props)
 
 Because each match page/feed carries *both* teams' stats, "for" and "against"
 come from the same fetch — no cross-referencing needed.
@@ -203,9 +219,10 @@ footy/
                  no browser): search → recent results → per-match statistics. Cached.
   apifootball.py API-Football client — optional national-team fallback (needs key).
   form.py        TeamForm: per-game for/against averages over the sample.
-  predict.py     Analytical Poisson model → 1X2, O/U goals, BTTS, O/U corners.
-  simulate.py    Monte Carlo engine (numpy) → everything above + handicaps,
-                 clean sheets, win-to-nil, score distribution, per-team corners.
+  predict.py     Analytical model (Poisson + Dixon-Coles) → 1X2, O/U goals, BTTS, O/U corners.
+  simulate.py    Monte Carlo engine (numpy) → everything above + handicaps, clean
+                 sheets, win-to-nil, score distribution, per-team corners
+                 (goals drawn from the Dixon-Coles score matrix).
   fixtures.py    follow list + upcoming-fixtures aggregation
   sportsdb.py    TheSportsDB client (fast fixtures API for the calendar)
   paths.py       resolves cache/resource dirs (works from source AND a frozen exe)
@@ -225,10 +242,12 @@ exp_home = (home.for + away.against) / 2
 exp_away = (away.for + home.against) / 2
 ```
 
-Goals get a home-advantage multiplier, then goals and corners are each modelled
-as Poisson processes. The analytical and Monte Carlo engines share the exact
-same expected values (`footy.predict.expected_values`), so they agree on common
-markets while the simulation adds the harder-to-derive ones.
+Each sampled match also carries a recency weight (recent games count more) that
+feeds the averages above. Goals get a home-advantage multiplier, then goals are
+modelled as Poisson with the Dixon-Coles low-score correction (corners stay
+plain Poisson). The analytical and Monte Carlo engines share the exact same
+expected values (`footy.predict.expected_values`) and correction, so they agree
+on common markets while the simulation adds the harder-to-derive ones.
 
 ---
 
@@ -254,7 +273,6 @@ API-Football key (see above), and cache is written next to the `.exe` at runtime
 
 ## Ideas to extend
 
-- Weight recent matches more heavily (form decay).
 - Split home/away venue form instead of overall.
 - Add correlation between goals and corners in the simulation.
-- Swap Poisson for Dixon–Coles (corrects low-score bias).
+- Fit ρ and the recency half-life per league instead of using fixed defaults.

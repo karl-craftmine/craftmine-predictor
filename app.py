@@ -21,61 +21,16 @@ import argparse
 import sys
 from collections import defaultdict
 
-from footy import WhoScoredScraper, build_form, predict_match, simulate_match
+from footy import (WhoScoredScraper, build_form, predict_match, simulate_match,
+                   apply_recency_weights)
 from footy import apifootball, flashscore
 from footy.whoscored import WhoScoredError
 from footy.form import METRIC_LABELS
 from footy.predict import implied_odds, DIXON_COLES_RHO
-import math
 
 
 def _pct(p) -> str:
     return f"{p * 100:5.1f}%" if p is not None else "  n/a"
-
-
-def _recency_weight(days_ago: int, half_life: int = 90) -> float:
-    """Exponential decay weight based on match recency.
-    
-    Recent matches get weight ~1.0, older matches decay toward 0.
-    half_life: days for weight to halve (default 90 days ~ 3 months)
-    """
-    if days_ago <= 0:
-        return 1.0
-    # Clamp very old matches to a minimum weight to avoid complete exclusion
-    weight = math.exp(-math.log(2) * days_ago / half_life)
-    return max(weight, 0.1)
-
-
-def _apply_recency_weights(matches: list, half_life: int = 90) -> list:
-    """Apply recency weights to match data based on dates."""
-    from datetime import datetime, timezone
-    
-    now = datetime.now(timezone.utc)
-    weighted_matches = []
-    
-    for m in matches:
-        date_str = m.get("date", "")
-        if not date_str:
-            weight = 1.0
-        else:
-            try:
-                # Parse date string (format varies by source)
-                if len(date_str) == 10 and date_str[4] == '-':  # YYYY-MM-DD
-                    match_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                else:
-                    # Try other formats or default to recent
-                    match_date = now
-                days_ago = (now - match_date).days
-                weight = _recency_weight(days_ago, half_life)
-            except Exception:
-                weight = 1.0
-        
-        # Add weight to match dict, preserving all original fields including nested dicts
-        weighted_match = m.copy() if isinstance(m, dict) else dict(m)
-        weighted_match["weight"] = weight
-        weighted_matches.append(weighted_match)
-    
-    return weighted_matches
 
 
 def _form_table(form) -> None:
@@ -277,34 +232,34 @@ def main(argv=None) -> int:
     # Apply recency weights if enabled (default: enabled)
     if not args.no_recency:
         print(f"Applying recency weighting (half-life: {args.recency_half_life} days)...")
-        home_matches = _apply_recency_weights(home_matches, args.recency_half_life)
-        away_matches = _apply_recency_weights(away_matches, args.recency_half_life)
+        home_matches = apply_recency_weights(home_matches, args.recency_half_life)
+        away_matches = apply_recency_weights(away_matches, args.recency_half_life)
 
     home_form = build_form(home_team["name"], home_matches)
     away_form = build_form(away_team["name"], away_matches)
     _form_table(home_form)
     _form_table(away_form)
 
+    # Dixon-Coles low-score correction (applied by BOTH engines now); the
+    # --no-dixon-coles flag turns it off.
+    rho = 0.0 if args.no_dixon_coles else DIXON_COLES_RHO
+    if rho != 0.0:
+        print(f"Using Dixon-Coles correction (rho={rho})")
+
     if args.sim:
-        # Note: Monte Carlo simulation uses independent Poisson (no Dixon-Coles)
-        # Dixon-Coles is only applied to analytical predictions
         res = simulate_match(
             home_form, away_form,
             iterations=args.iterations,
             home_advantage=args.home_advantage,
             goals_line=args.goals_line,
             corners_line=args.corners_line,
+            rho=rho,
         )
         _print_sim(res)
         _maybe_players(args, home_team, home_matches, away_team, away_matches)
         print("\n  Note: a baseline model. Compare to bookmaker odds before "
               "betting. Gamble responsibly.")
         return 0
-
-    # Determine rho for Dixon-Coles correction
-    rho = 0.0 if args.no_dixon_coles else DIXON_COLES_RHO
-    if rho != 0.0:
-        print(f"Using Dixon-Coles correction (rho={rho})")
 
     pred = predict_match(
         home_form, away_form,

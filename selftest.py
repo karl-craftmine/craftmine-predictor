@@ -3,10 +3,11 @@
     python selftest.py
 
 Confirms the math works and that the Monte Carlo simulation agrees with the
-analytical model on shared markets, before you pull live WhoScored data.
+analytical model on shared markets — both with and without the Dixon-Coles
+low-score correction — before you pull live WhoScored data.
 """
 
-from footy import build_form, predict_match, simulate_match
+from footy import build_form, predict_match, simulate_match, DIXON_COLES_RHO
 
 
 def fake(team, gf, ga, cf, ca, n=8):
@@ -34,6 +35,15 @@ def main() -> int:
     assert abs(res.prob_over_goals - pred.prob_over_goals) < 0.02
     assert abs(res.prob_corners_over - pred.prob_corners_over) < 0.02
 
+    # With Dixon-Coles on, the corrected MC (sampling from the DC score matrix)
+    # must still match the corrected analytical model, and the correction must
+    # lift draws above the independent-Poisson baseline.
+    pred_dc = predict_match(home, away, rho=DIXON_COLES_RHO)
+    res_dc = simulate_match(home, away, iterations=60000, seed=7, rho=DIXON_COLES_RHO)
+    assert abs(res_dc.prob_home - pred_dc.prob_home) < 0.02, (res_dc.prob_home, pred_dc.prob_home)
+    assert abs(res_dc.prob_draw - pred_dc.prob_draw) < 0.02, (res_dc.prob_draw, pred_dc.prob_draw)
+    assert pred_dc.prob_draw > pred.prob_draw, "Dixon-Coles should boost draws"
+
     print("Self-test passed.\n")
     print(f"  Analytical  H/D/A: {pred.prob_home:.0%} / {pred.prob_draw:.0%} / {pred.prob_away:.0%}"
           f"   O{pred.goals_line}: {pred.prob_over_goals:.0%}"
@@ -44,6 +54,8 @@ def main() -> int:
     print(f"  MC extras -> home clean sheet {res.clean_sheet_home:.0%}, "
           f"home -1.5 {dict(res.handicaps)['Home -1.5']:.0%}, "
           f"home win-to-nil {res.win_to_nil_home:.0%}")
+    print(f"  Dixon-Coles -> draw {pred.prob_draw:.1%} (Poisson) -> "
+          f"{pred_dc.prob_draw:.1%} (analytical) ~ {res_dc.prob_draw:.1%} (MC)")
     return 0
 
 

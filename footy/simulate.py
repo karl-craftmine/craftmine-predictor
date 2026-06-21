@@ -7,6 +7,13 @@ simulation also yields things that are awkward to derive analytically:
 exact-score distribution, Asian handicaps, clean sheets, win-to-nil, and
 per-team / total corner lines.
 
+When ``rho`` is non-zero the goals draw isn't independent Poisson: pairs are
+sampled from the Dixon-Coles-corrected joint score matrix (the same one
+`predict.py` builds), so the simulation reproduces the analytical low-score
+boost — more draws / 0-0 / 1-1 — instead of assuming the two scores are
+independent. Corners and the other count metrics stay independent Poisson, as
+the correction is specific to goals.
+
 Uses numpy for speed (vectorised RNG); falls back to pure Python if numpy is
 absent (slower, but works).
 """
@@ -18,12 +25,31 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .form import TeamForm, COUNT_METRICS, METRIC_LABELS
-from .predict import expected_values, _blend, implied_odds
+from .predict import (expected_values, _blend, implied_odds,
+                      _goal_matrix, _apply_dixon_coles, MAX_GOALS)
 
 try:
     import numpy as np
 except ImportError:  # pragma: no cover
     np = None
+
+
+def _sample_goal_pairs(rng, eh: float, ea: float, n: int, rho: float):
+    """Draw ``n`` (home_goals, away_goals) pairs.
+
+    ``rho == 0`` → independent Poisson (fast path, two vectorised draws).
+    Otherwise sample from the Dixon-Coles-corrected joint score matrix that
+    `predict.py` builds and renormalises, so the simulated 1X2 / draw rates
+    match the analytical Dixon-Coles model rather than assuming independence.
+    """
+    if not rho:
+        return rng.poisson(eh, n), rng.poisson(ea, n)
+    matrix = _apply_dixon_coles(_goal_matrix(eh, ea), eh, ea, rho)
+    flat = np.asarray(matrix, dtype=float).ravel()
+    flat /= flat.sum()                       # guard against truncation drift
+    idx = rng.choice(flat.size, size=n, p=flat)
+    span = MAX_GOALS + 1                      # matrix is span × span, row-major
+    return (idx // span).astype(np.int64), (idx % span).astype(np.int64)
 
 
 @dataclass
@@ -65,6 +91,7 @@ def simulate_match(
     corners_line: float = 9.5,
     team_corners_line: float = 4.5,
     seed: Optional[int] = None,
+    rho: float = 0.0,
 ) -> SimResult:
     if np is None:  # pragma: no cover
         raise RuntimeError("numpy is required for simulation (pip install numpy)")
@@ -72,8 +99,7 @@ def simulate_match(
     eh, ea, ch, ca = expected_values(home, away, home_advantage)
     rng = np.random.default_rng(seed)
 
-    hg = rng.poisson(eh, iterations)
-    ag = rng.poisson(ea, iterations)
+    hg, ag = _sample_goal_pairs(rng, eh, ea, iterations, rho)
     total = hg + ag
     diff = hg - ag
 
@@ -166,7 +192,7 @@ class Simulation:
 
 def run_simulation(home: TeamForm, away: TeamForm, iterations: int = 50000,
                    home_advantage: float = 1.10, player_specs=None,
-                   seed=None) -> Simulation:
+                   seed=None, rho: float = 0.0) -> Simulation:
     if np is None:  # pragma: no cover
         raise RuntimeError("numpy is required (pip install numpy)")
     rng = np.random.default_rng(seed)
@@ -177,7 +203,12 @@ def run_simulation(home: TeamForm, away: TeamForm, iterations: int = 50000,
             continue
         eh, ea = m
         sim.means[metric] = (round(eh, 2), round(ea, 2))
-        sim.metrics[metric] = (rng.poisson(eh, iterations), rng.poisson(ea, iterations))
+        # Goals carry the Dixon-Coles low-score correction; the other count
+        # metrics (corners, shots, …) stay independent Poisson.
+        if metric == "goals":
+            sim.metrics[metric] = _sample_goal_pairs(rng, eh, ea, iterations, rho)
+        else:
+            sim.metrics[metric] = (rng.poisson(eh, iterations), rng.poisson(ea, iterations))
     for spec in (player_specs or []):
         # shots/sot can be None (Flashscore nationals have no per-player shot
         # data); leave those arrays None so evaluate_bet reports "no data"

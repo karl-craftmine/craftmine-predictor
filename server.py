@@ -18,7 +18,8 @@ from pathlib import Path
 from flask import Flask, jsonify, request
 
 from footy import (WhoScoredScraper, build_form, aggregate_players,
-                   run_simulation, evaluate_bet, sportsdb)
+                   apply_recency_weights, run_simulation, evaluate_bet,
+                   sportsdb, DIXON_COLES_RHO)
 from footy import apifootball, flashscore
 from footy.whoscored import WhoScoredError
 from footy.form import METRIC_LABELS, COUNT_METRICS
@@ -115,6 +116,9 @@ def _get_data(home, away, matches):
         if not hm or not am:
             raise WhoScoredError("Couldn't find enough finished matches for one "
                                  "of those teams — check the spelling?")
+        # Weight recent matches more heavily before aggregating (matches the CLI).
+        hm = apply_recency_weights(hm)
+        am = apply_recency_weights(am)
         data = {
             "home_team": ht, "away_team": at,
             "home_form": build_form(ht["name"], hm),
@@ -201,7 +205,8 @@ def api_simulate():
                 seen.add(key)
 
     sim = run_simulation(data["home_form"], data["away_form"],
-                         iterations=iterations, player_specs=specs)
+                         iterations=iterations, player_specs=specs,
+                         rho=DIXON_COLES_RHO)
 
     if not bets:  # sensible defaults if the slip is empty
         bets = [{"type": "result", "side": "home"},

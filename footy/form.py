@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -134,3 +136,32 @@ def build_form(team_name: str, matches: list[dict[str, Any]]) -> TeamForm:
             }
         )
     return form
+
+
+def apply_recency_weights(matches: list[dict[str, Any]],
+                          half_life: float = 90.0) -> list[dict[str, Any]]:
+    """Tag each match with an exponential-decay ``weight`` by age in days.
+
+    Recent matches keep weight ~1.0; older ones decay with the given half-life
+    (days for the weight to halve), floored at 0.1 so old games still count a
+    little. Matches with no parseable ``YYYY-MM-DD`` date keep weight 1.0.
+    ``build_form`` reads this ``weight``, so emphasising recent form is just a
+    pre-pass over the match list — used by both the CLI and the web app.
+    """
+    now = datetime.now(timezone.utc)
+    out: list[dict[str, Any]] = []
+    for m in matches:
+        weight = 1.0
+        date_str = m.get("date") or ""
+        if len(date_str) == 10 and date_str[4] == "-":
+            try:
+                d = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                days_ago = (now - d).days
+                if days_ago > 0:
+                    weight = max(math.exp(-math.log(2) * days_ago / half_life), 0.1)
+            except ValueError:
+                weight = 1.0
+        weighted = dict(m)
+        weighted["weight"] = weight
+        out.append(weighted)
+    return out

@@ -6,9 +6,10 @@ team's "attack" with the away team's "defence" (and vice versa):
     exp_home = (home.for + away.against) / 2
     exp_away = (away.for + home.against) / 2
 
-Goals get a home-advantage multiplier. Goals and corners are then modelled as
-independent Poisson processes, which yields:
-  * 1X2 (home / draw / away) from the goal score matrix
+Goals get a home-advantage multiplier. Goals are modelled as Poisson with an
+optional Dixon-Coles low-score correction (``rho``); corners stay independent
+Poisson. This yields:
+  * 1X2 (home / draw / away) from the (corrected) goal score matrix
   * Over/Under and BTTS for goals
   * Over/Under for total corners
 

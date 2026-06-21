@@ -7,8 +7,8 @@ Public API:
 from .whoscored import WhoScoredScraper, WhoScoredError
 from . import apifootball
 from . import flashscore
-from .form import TeamForm, build_form, aggregate_players
-from .predict import predict_match, MatchPrediction
+from .form import TeamForm, build_form, aggregate_players, apply_recency_weights
+from .predict import predict_match, MatchPrediction, DIXON_COLES_RHO
 from .simulate import (simulate_match, SimResult, run_simulation, Simulation,
                        evaluate_bet)
 
@@ -20,8 +20,10 @@ __all__ = [
     "TeamForm",
     "build_form",
     "aggregate_players",
+    "apply_recency_weights",
     "predict_match",
     "MatchPrediction",
+    "DIXON_COLES_RHO",
     "simulate_match",
     "SimResult",
     "run_simulation",
