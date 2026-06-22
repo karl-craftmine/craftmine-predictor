@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
+from .paths import data_dir
+
 BASE = "https://www.whoscored.com"
 
 # Leagues scraped once to seed the team-name autocomplete index.
@@ -189,14 +191,18 @@ def _parse_score(mc: dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
 class WhoScoredScraper:
     def __init__(
         self,
-        cache_dir: str | Path = "cache",
+        cache_dir: str | Path | None = None,
         cache_ttl: float = 6 * 3600,
         headless: bool = False,
         reconnect_time: float = 6.0,
         wait: float = 4.0,
         min_interval: float = 0.8,
     ):
-        self.cache_dir = Path(cache_dir)
+        # Default to the writable cache next to the .exe/repo (data_dir), NOT a
+        # path relative to the launch dir — otherwise a non-writable working
+        # directory makes mkdir fail with "[WinError 5] Access is denied: 'cache'",
+        # and the cache splits from flashscore/apifootball, which already use this.
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else data_dir() / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_ttl = cache_ttl
         self.headless = headless

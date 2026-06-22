@@ -31,7 +31,7 @@ from urllib.parse import quote
 
 from curl_cffi import requests
 
-from . import apifootball  # reuse its national-team list so routing agrees
+from . import nations  # national-team detection shared by both providers
 from .paths import data_dir
 
 # Flashscore's data pipeline.
@@ -143,10 +143,33 @@ class FlashscoreScraper:
 
     # -- endpoints ----------------------------------------------------------
 
-    def search_team(self, name: str) -> Optional[dict[str, str]]:
-        """Best national-team match -> {id, country_id, name, url}, or None.
+    def _search(self, query: str) -> list[dict[str, Any]]:
+        """Raw Flashscore search -> list of 'participant' (team) records.
 
-        Flashscore search is JSONP: ``cjs.search.jsonpCallback({...})``.
+        Flashscore search is JSONP: ``cjs.search.jsonpCallback({...})``. It spans
+        all of world football, so this backs both club and national-team lookups.
+        """
+        self._throttle()
+        url = f"{SEARCH}?q={quote(query)}&l=1&s=1&f=1%3B1&pid=2&sid=1"
+        try:
+            raw = self.session.get(url, timeout=20).text
+        except Exception as e:
+            raise FlashscoreError(f"search '{query}' failed: {e}")
+        m = re.search(r"\{.*\}", raw, re.S)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group())
+        except json.JSONDecodeError:
+            return []
+        return [r for r in (data.get("results") or [])
+                if r.get("type") == "participants" and r.get("id")]
+
+    def search_team(self, name: str) -> Optional[dict[str, str]]:
+        """Best matching team -> {id, country_id, name, url}, or None.
+
+        Works for clubs and national teams; prefers the senior side over youth/
+        women variants. Cached on disk (team names rarely change).
         """
         cache_file = _CACHE / f"fs_search_{re.sub(r'[^a-z0-9]+', '_', name.lower())}.json"
         if self.cache_ttl > 0 and cache_file.exists():
@@ -155,27 +178,13 @@ class FlashscoreScraper:
                     return json.loads(cache_file.read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     pass
-        self._throttle()
-        url = f"{SEARCH}?q={quote(name)}&l=1&s=1&f=1%3B1&pid=2&sid=1"
-        try:
-            raw = self.session.get(url, timeout=20).text
-        except Exception as e:
-            raise FlashscoreError(f"search '{name}' failed: {e}")
-        m = re.search(r"\{.*\}", raw, re.S)
-        if not m:
-            return None
-        try:
-            data = json.loads(m.group())
-        except json.JSONDecodeError:
-            return None
-
-        teams = [r for r in (data.get("results") or [])
-                 if r.get("type") == "participants" and r.get("id")]
+        raw = self._search(name)
+        teams = [r for r in raw if r.get("participant_type_id") == 1] or raw
         if not teams:
             return None
         target = name.strip().lower()
-        # Prefer an exact name match (the part before " (Confederation)") so we
-        # pick the senior side, not "<Country> U21" / "<Country> W".
+        # Prefer an exact name match (the part before " (Country)") so we pick
+        # the senior side, not "<Name> U21" / "<Name> W".
         def base(r: dict) -> str:
             return (r.get("title") or "").split(" (")[0].strip().lower()
         best = next((r for r in teams if base(r) == target), teams[0])
@@ -187,6 +196,41 @@ class FlashscoreScraper:
         }
         cache_file.write_text(json.dumps(result), encoding="utf-8")
         return result
+
+    def search_participants(self, query: str, limit: int = 10) -> list[dict[str, str]]:
+        """Autocomplete suggestions -> [{name, country}] of senior football teams.
+
+        Clubs and national teams worldwide; youth ("U19") and women ("… W") sides
+        are dropped and duplicate names collapsed. Cached briefly on disk so
+        repeat keystrokes don't re-hit the network.
+        """
+        cache_file = _CACHE / f"fs_ac_{re.sub(r'[^a-z0-9]+', '_', query.lower())}.json"
+        if cache_file.exists() and time.time() - cache_file.stat().st_mtime < 7 * 24 * 3600:
+            try:
+                return json.loads(cache_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                pass
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for r in self._search(query):
+            # football teams only: sport_id 1 = soccer, participant_type_id 1 =
+            # team (2 = individual player, which Flashscore search also returns).
+            if r.get("sport_id") != 1 or r.get("participant_type_id") != 1:
+                continue
+            title = r.get("title") or ""
+            name = title.split(" (")[0].strip()
+            low = name.lower()
+            if not name or low in seen:
+                continue
+            if re.search(r"\bU\d{2}\b", name) or re.search(r"\sW$", name):
+                continue                                # skip youth / women sides
+            seen.add(low)
+            mc = re.search(r"\(([^)]+)\)\s*$", title)   # trailing "(Country)"
+            out.append({"name": name, "country": mc.group(1) if mc else ""})
+            if len(out) >= limit:
+                break
+        cache_file.write_text(json.dumps(out), encoding="utf-8")
+        return out
 
     def get_match_statistics(self, match_id: str) -> dict[str, dict[str, Optional[float]]]:
         """Full-match stats for one match -> {'home': {...}, 'away': {...}}.
@@ -348,9 +392,17 @@ class FlashscoreScraper:
 def is_national_team(team_name: str) -> bool:
     """True if this is a national team and should be routed to Flashscore.
 
-    Shares API-Football's country list so the two national-team sources agree.
+    Shares the central country list so the two national-team sources agree.
     """
-    return apifootball.is_national(team_name)
+    return nations.is_national(team_name)
+
+
+def search_participants(query: str, limit: int = 10) -> list[dict[str, str]]:
+    """Autocomplete helper (clubs + national teams worldwide). Never raises."""
+    try:
+        return FlashscoreScraper().search_participants(query, limit)
+    except FlashscoreError:
+        return []
 
 
 def load_team(team_name: str, matches_limit: int = 10

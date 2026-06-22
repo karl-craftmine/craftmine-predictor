@@ -20,7 +20,7 @@ from flask import Flask, jsonify, request
 from footy import (WhoScoredScraper, build_form, aggregate_players,
                    apply_recency_weights, run_simulation, evaluate_bet,
                    top_scorelines, sportsdb, DIXON_COLES_RHO)
-from footy import apifootball, flashscore
+from footy import apifootball, flashscore, nations
 from footy.whoscored import WhoScoredError
 from footy.form import METRIC_LABELS, COUNT_METRICS
 from footy.fixtures import load_follows, save_follows, refresh_cache
@@ -34,40 +34,6 @@ FIXTURES_FILE = _CACHE / "fixtures.json"
 app = Flask(__name__)
 _scrape_lock = threading.Lock()
 _LOADED: dict[str, dict] = {}   # in-memory cache of loaded matchups
-
-_INDEX_FILE = _CACHE / "teams_index.json"
-_team_index: list | None = None
-_index_lock = threading.Lock()
-
-
-def _ensure_index():
-    """Team-name autocomplete index — built once from major leagues, cached."""
-    global _team_index
-    if _team_index is not None:
-        return _team_index
-    if _INDEX_FILE.exists():
-        try:
-            _team_index = json.loads(_INDEX_FILE.read_text(encoding="utf-8"))
-            return _team_index
-        except json.JSONDecodeError:
-            pass
-    with _index_lock:
-        if _team_index is not None:
-            return _team_index
-        with _scrape_lock:
-            with WhoScoredScraper(headless=True) as ws:
-                teams = ws.build_team_index()
-        _INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _INDEX_FILE.write_text(json.dumps(teams), encoding="utf-8")
-        _team_index = teams
-    return _team_index
-
-
-def _safe_index():
-    try:
-        _ensure_index()
-    except Exception:
-        pass  # autocomplete is a convenience; never crash the server over it
 
 
 def _clamp(v, lo, hi):
@@ -84,14 +50,14 @@ def _national_name(name) -> str | None:
     Exact country match, or a close typo — so 'Spein' routes to Spain
     (Flashscore) instead of dead-ending on a WhoScored club search.
     """
-    if apifootball.is_national(name):
+    if nations.is_national(name):
         return name
-    return apifootball.closest_country(name, cutoff=0.8)
+    return nations.closest_country(name, cutoff=0.8)
 
 
 def _team_error(name) -> str:
     """A helpful 'couldn't load' message, suggesting a country if it's a typo."""
-    guess = apifootball.closest_country(name, cutoff=0.6)
+    guess = nations.closest_country(name, cutoff=0.6)
     if guess:
         return f"Couldn't find '{name}'. Did you mean {guess.title()}?"
     return (f"Couldn't find enough finished matches for '{name}' — check the "
@@ -109,25 +75,31 @@ def _get_data(home, away, matches):
         ht, hm, at, am = None, None, None, None
         hsrc = asrc = None      # which provider supplied each side (for the UI)
 
-        # National teams — exact name OR an obvious country typo ("Spein" ->
-        # Spain) — go to Flashscore (free, current), then API-Football.
+        # Flashscore first for BOTH clubs and national teams: one fast HTTP source
+        # (no browser/Cloudflare) covering ~all of world football. For nationals
+        # use the resolved country name so an obvious typo ("Spein" -> Spain) still
+        # routes; for clubs the raw typed name is what Flashscore searches.
         home_nat, away_nat = _national_name(home), _national_name(away)
-        if home_nat:
-            try:
-                ht, hm = flashscore.load_team(home_nat, matches); hsrc = "flashscore"
-            except flashscore.FlashscoreError:
-                if apifootball.has_key():
-                    ht, hm = apifootball.load_team(home_nat, matches); hsrc = "apifootball"
-        if away_nat:
-            try:
-                at, am = flashscore.load_team(away_nat, matches); asrc = "flashscore"
-            except flashscore.FlashscoreError:
-                if apifootball.has_key():
-                    at, am = apifootball.load_team(away_nat, matches); asrc = "apifootball"
+        try:
+            ht, hm = flashscore.load_team(home_nat or home, matches); hsrc = "flashscore"
+        except flashscore.FlashscoreError:
+            pass
+        try:
+            at, am = flashscore.load_team(away_nat or away, matches); asrc = "flashscore"
+        except flashscore.FlashscoreError:
+            pass
 
-        # Clubs go to WhoScored (richer club stats). Tolerate a not-found/empty
-        # result — and even a browser that won't start (no Chrome) — so the
-        # Flashscore fallback below can still try.
+        # API-Football fallback for national teams Flashscore lacks (needs a key).
+        if not hm and home_nat and apifootball.has_key():
+            t, m = apifootball.load_team(home_nat, matches)
+            if m: ht, hm, hsrc = t, m, "apifootball"
+        if not am and away_nat and apifootball.has_key():
+            t, m = apifootball.load_team(away_nat, matches)
+            if m: at, am, asrc = t, m, "apifootball"
+
+        # WhoScored last resort for any club Flashscore couldn't find — richer
+        # per-player shot stats, but slow (headless browser + Cloudflare) and only
+        # the major leagues. Tolerate a browser that won't start (e.g. no Chrome).
         if not hm or not am:
             try:
                 with WhoScoredScraper(headless=True) as ws:
@@ -146,20 +118,7 @@ def _get_data(home, away, matches):
                         except WhoScoredError:
                             pass
             except Exception:
-                pass   # browser unavailable (e.g. no Chrome) — try Flashscore next
-
-        # Flashscore fallback for clubs WhoScored can't cover (e.g. Russian
-        # leagues) — its feeds carry those clubs, incl. per-player ratings.
-        if not hm:
-            try:
-                ht, hm = flashscore.load_team(home, matches); hsrc = "flashscore"
-            except flashscore.FlashscoreError:
-                pass
-        if not am:
-            try:
-                at, am = flashscore.load_team(away, matches); asrc = "flashscore"
-            except flashscore.FlashscoreError:
-                pass
+                pass   # browser unavailable — nothing more to try
 
         if not hm or not am:
             raise WhoScoredError(_team_error(home if not hm else away))
@@ -274,16 +233,12 @@ def api_simulate():
 
 @app.route("/api/teams")
 def api_teams():
-    q = (request.args.get("q") or "").strip().lower()
+    """Team-name autocomplete for the match inputs — clubs and national teams
+    worldwide, live from Flashscore (the same source that loads them)."""
+    q = (request.args.get("q") or "").strip()
     if len(q) < 2:
         return jsonify([])
-    try:
-        idx = _ensure_index()
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 500
-    starts = [t for t in idx if t["name"].lower().startswith(q)]
-    contains = [t for t in idx if q in t["name"].lower() and t not in starts]
-    return jsonify([{"name": t["name"], "id": t["id"]} for t in (starts + contains)][:10])
+    return jsonify(flashscore.search_participants(q, limit=10))
 
 
 @app.route("/api/follows", methods=["GET", "POST"])
@@ -364,10 +319,12 @@ def _free_port(start: int = 5000, tries: int = 20) -> int:
 
 
 if __name__ == "__main__":
-    # Warm the autocomplete index in the background so it's ready by the time
-    # the user types (first build ~1 min; cached to disk after that).
-    if not _INDEX_FILE.exists():
-        threading.Thread(target=_safe_index, daemon=True).start()
-    port = _free_port()
+    import os
+    import sys
+    # Honour an explicit port (CLI arg or PORT env) so a launcher can pin one;
+    # otherwise grab the first free port from 5000 so a stuck port never blocks.
+    explicit = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].isdigit() else \
+        os.environ.get("PORT", "")
+    port = int(explicit) if explicit.isdigit() else _free_port()
     print(f"Craftmine Football Predictor running at  http://127.0.0.1:{port}")
     app.run(host="127.0.0.1", port=port, threaded=True)

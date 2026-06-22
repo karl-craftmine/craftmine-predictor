@@ -15,7 +15,6 @@ NOTE: Free tier cannot use fixtures?last= — we pull finished games by season
 
 from __future__ import annotations
 
-import difflib
 import json
 import os
 import time
@@ -59,38 +58,6 @@ def get_key() -> Optional[str]:
 
 def has_key() -> bool:
     return bool(get_key())
-
-
-# Footballing nations — if a team name is one of these, treat it as a national
-# team and go straight to API-Football (WhoScored barely covers internationals).
-COUNTRIES = {
-    "argentina", "australia", "austria", "belgium", "bolivia", "brazil", "cameroon",
-    "canada", "cape verde", "chile", "china", "colombia", "costa rica", "croatia",
-    "curacao", "curaçao", "czech republic", "denmark", "ecuador", "egypt", "england",
-    "france", "germany", "ghana", "greece", "haiti", "honduras", "hungary", "iceland",
-    "iran", "iraq", "ireland", "israel", "italy", "ivory coast", "jamaica", "japan",
-    "jordan", "mexico", "morocco", "netherlands", "new zealand", "nigeria", "norway",
-    "panama", "paraguay", "peru", "poland", "portugal", "qatar", "saudi arabia",
-    "scotland", "senegal", "serbia", "slovakia", "slovenia", "south africa",
-    "south korea", "spain", "sweden", "switzerland", "tunisia", "turkey", "ukraine",
-    "uruguay", "usa", "united states", "venezuela", "wales",
-}
-
-
-def is_national(name: str) -> bool:
-    return (name or "").strip().lower() in COUNTRIES
-
-
-def closest_country(name: str, cutoff: float = 0.8) -> Optional[str]:
-    """Best-matching country for a (possibly misspelled) name, or None.
-
-    Used to (a) auto-route obvious country typos to Flashscore ('Spein' ->
-    'spain') and (b) suggest a correction in 'team not found' errors (looser
-    cutoff). Returns the lower-cased country key from COUNTRIES.
-    """
-    matches = difflib.get_close_matches(
-        (name or "").strip().lower(), list(COUNTRIES), n=1, cutoff=cutoff)
-    return matches[0] if matches else None
 
 
 _last = 0.0

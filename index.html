@@ -92,7 +92,7 @@
 <body>
 <div class="wrap">
   <h1>Craftmine Football Predictor</h1>
-  <div class="sub">Whoscored data | Match simulator | Bet builder</div>
+  <div class="sub">Flashscore + WhoScored data | Match simulator | Bet builder</div>
 
   <div class="panel" id="follow">
     <div class="frow">
@@ -185,7 +185,7 @@ function sourceNote(d){
   let s=`Stats source — ${d.home.name}: ${hn} · ${d.away.name}: ${an}.\n`;
   const srcs=new Set([d.home.source,d.away.source]);
   if(srcs.has("whoscored")) s+=" Clubs use WhoScored: full per-player stats (shots, SoT, goals, rating).";
-  if(srcs.has("flashscore")) s+=" National teams use Flashscore: per-player ratings & goals, but no per-player shots/SoT — those show “—” and the shots/SoT prop is hidden. Friendlies are often unrated, so only rated matches add players.";
+  if(srcs.has("flashscore")) s+=" Flashscore gives per-player ratings & goals, but no per-player shots/SoT — those show “—” and the shots/SoT prop is hidden. Unrated matches (often friendlies) add no players.";
   if(srcs.has("apifootball")) s+=" One side fell back to API-Football: team-level stats only, no per-player data.";
   return s;
 }
@@ -308,11 +308,7 @@ async function loadMatch() {
   $("err").style.display="none"; $("builder").style.display="none"; $("results").style.display="none";
   if(!home||!away){ showErr("Enter both teams."); return; }
   $("load").disabled=true; $("status").classList.add("show");
-  const nat = new Set(["argentina","australia","austria","belgium","brazil","cameroon","canada","chile","china","colombia","croatia","czech republic","denmark","ecuador","egypt","england","france","germany","ghana","greece","hungary","iceland","iran","ireland","israel","italy","japan","mexico","morocco","netherlands","nigeria","norway","poland","portugal","qatar","saudi arabia","scotland","senegal","serbia","slovakia","slovenia","south africa","south korea","spain","sweden","switzerland","tunisia","turkey","ukraine","uruguay","usa","united states","wales"]);
-  const bothNat = nat.has(home.toLowerCase()) && nat.has(away.toLowerCase());
-  $("statusmsg").textContent = bothNat
-    ? "Fetching from Flashscore… national teams are usually ready in a few seconds."
-    : "Fetching match data… club teams use WhoScored (~1–2 min first lookup); national teams use Flashscore.";
+  $("statusmsg").textContent = "Fetching from Flashscore… usually ready in a few seconds.";
   try {
     const r = await fetch("/api/load",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({home,away,matches:+$("matches").value})});
@@ -394,7 +390,10 @@ function setupAC(inputId, acId, endpoint="/api/teams") {
         const r=await fetch(endpoint+"?q="+encodeURIComponent(q));
         const list=await r.json();
         if(!Array.isArray(list)||!list.length){ ac.style.display="none"; return; }
-        ac.innerHTML=list.map(t=>`<div>${t.name}</div>`).join("");
+        ac.innerHTML=list.map(t=>{
+          const hint=t.country||t.league||"";
+          return `<div>${t.name}${hint?` <span style="opacity:.5">${hint}</span>`:""}</div>`;
+        }).join("");
         ac.querySelectorAll("div").forEach((dv,i)=>dv.addEventListener("mousedown", e=>{
           e.preventDefault(); inp.value=list[i].name; ac.style.display="none";
         }));
@@ -404,7 +403,7 @@ function setupAC(inputId, acId, endpoint="/api/teams") {
   });
   inp.addEventListener("blur", ()=>setTimeout(()=>ac.style.display="none", 150));
 }
-setupAC("home","ac_home","/api/sdteam"); setupAC("away","ac_away","/api/sdteam");
+setupAC("home","ac_home","/api/teams"); setupAC("away","ac_away","/api/teams");
 
 function showErr(m){ $("err").textContent=m; $("err").style.display="block"; }
 $("load").onclick=loadMatch;
