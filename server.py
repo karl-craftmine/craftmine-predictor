@@ -210,8 +210,12 @@ def api_simulate():
                               "goals": p["goals_avg"]})
                 seen.add(key)
 
+    # International games (both sides national) are at neutral venues — there's no
+    # real home team here, just input order — so don't apply a home-advantage tilt.
+    neutral = nations.is_national(home) and nations.is_national(away)
     sim = run_simulation(data["home_form"], data["away_form"],
                          iterations=iterations, player_specs=specs,
+                         home_advantage=1.0 if neutral else 1.10,
                          rho=DIXON_COLES_RHO)
 
     if not bets:  # sensible defaults if the slip is empty

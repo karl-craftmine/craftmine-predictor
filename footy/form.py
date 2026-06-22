@@ -58,6 +58,10 @@ class TeamForm:
         n = self._count.get(key, 0)
         return self._sum_against[key] / n if n else None
 
+    def samples(self, key: str) -> int:
+        """How many matches fed `key` (weighted count rounded to whole matches)."""
+        return int(round(self._count.get(key, 0)))
+
     def as_dict(self) -> dict[str, dict[str, Optional[float]]]:
         out = {}
         for k in self._count:

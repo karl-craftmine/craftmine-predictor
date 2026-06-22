@@ -40,7 +40,51 @@ def poisson_sf_over(line: float, lam: float) -> float:
     return max(0.0, 1.0 - cdf_below)
 
 
+# --- goals model ----------------------------------------------------------
+# Expected goals can be computed two ways:
+#   "average"        — legacy: (team attack + opponent defence) / 2.
+#   "multiplicative" — λ = μ · attack · defence, where attack/defence are each
+#                      team's goals-for / goals-against relative to a league
+#                      baseline μ. A strong attack meeting a weak defence now
+#                      *compounds* instead of averaging out, so lopsided games
+#                      (e.g. Spain vs a minnow) aren't pulled toward the middle.
+# Switchable so footy/backtest.py can score the two head-to-head.
+GOALS_MODEL = "multiplicative"
+
+LEAGUE_AVG_GOALS = 1.35     # reference goals per team per game (the baseline μ)
+_RATING_SHRINK = 5.0        # pseudo-matches pulling a thin sample toward average
+_RATING_CLAMP = 2.2         # cap on a single attack/defence multiplier
+_MAX_EXP_GOALS = 4.0        # ceiling on expected goals (tames small-sample blow-ups)
+
+
+def _rating(value: Optional[float], samples: int, mu: float) -> float:
+    """A team's goal strength relative to baseline μ, shrunk for small samples.
+
+    1.0 = average; >1 scores/concedes more than average. With few matches the
+    estimate is pulled toward 1.0 (regression to the mean) and clamped, so a
+    fluky 5-0 in a 3-game sample can't explode the prediction.
+    """
+    if value is None or mu <= 0:
+        return 1.0
+    raw = value / mu
+    shrunk = 1.0 + (raw - 1.0) * (samples / (samples + _RATING_SHRINK)) if samples else 1.0
+    return min(_RATING_CLAMP, max(1.0 / _RATING_CLAMP, shrunk))
+
+
+def _expected_goals(home: TeamForm, away: TeamForm,
+                    mu: float = LEAGUE_AVG_GOALS) -> tuple[float, float]:
+    """Multiplicative attack×defence expected goals (pre home-advantage)."""
+    att_h = _rating(home.avg_for("goals"), home.samples("goals"), mu)
+    def_a = _rating(away.avg_against("goals"), away.samples("goals"), mu)
+    att_a = _rating(away.avg_for("goals"), away.samples("goals"), mu)
+    def_h = _rating(home.avg_against("goals"), home.samples("goals"), mu)
+    return (min(_MAX_EXP_GOALS, mu * att_h * def_a),
+            min(_MAX_EXP_GOALS, mu * att_a * def_h))
+
+
 def _blend(home: TeamForm, away: TeamForm, key: str) -> tuple[Optional[float], Optional[float]]:
+    if key == "goals" and GOALS_MODEL == "multiplicative":
+        return _expected_goals(home, away)
     hf, ha = home.avg_for(key), home.avg_against(key)
     af, aa = away.avg_for(key), away.avg_against(key)
     exp_home = (hf + aa) / 2 if hf is not None and aa is not None else hf
